@@ -7,8 +7,6 @@ export const DEFAULT_SETTINGS = {
   // ключ и модель у каждого провайдера свои: поля называются `${id}Key` и `${id}Model`
   openrouterKey: '',
   openrouterModel: '',
-  opencodegoKey: '',
-  opencodegoModel: '',
   examples: '', // примеры цитат для LLM, по одной на строку
 };
 
@@ -30,10 +28,14 @@ function write(key, value) {
   }
 }
 
-/** В первой версии были общие поля apiKey и model, ключ тогда просили от OpenRouter. */
+/**
+ * В первой версии были общие поля apiKey и model, ключ тогда просили от OpenRouter.
+ * Провайдер OpenCode Go убран: его токен и выбор стираются, чтобы секрет не лежал в браузере без дела.
+ */
 function migrate(stored) {
   if (!stored) return {};
-  const { apiKey, model, ...rest } = stored;
+  const { apiKey, model, opencodegoKey, opencodegoModel, ...rest } = stored;
+  if (rest.provider === 'opencodego') rest.provider = DEFAULT_SETTINGS.provider;
   if (apiKey && !rest.openrouterKey) rest.openrouterKey = apiKey;
   if (model && !rest.openrouterModel) rest.openrouterModel = model;
   return rest;

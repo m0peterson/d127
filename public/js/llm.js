@@ -11,8 +11,8 @@
  *   signal,          AbortSignal, необязательный
  * }
  *
- * Провайдеры OpenRouter и OpenCode Go говорят на OpenAI-совместимом chat completions,
- * поэтому у них общая реализация. Запрос идёт прямо из браузера, ключ уходит только на их домен.
+ * OpenRouter говорит на OpenAI-совместимом chat completions. Запрос идёт прямо из браузера,
+ * ключ уходит только на openrouter.ai.
  */
 
 import { randomInt } from './dice.js';
@@ -77,8 +77,6 @@ export const normalizers = {
       .replace(/^models\//i, '')
       .replace(/[?#].*$/, '')
       .replace(/\/+$/, ''),
-  // в opencode id моделей пишут как `opencode-go/<модель>`, API ждёт просто `<модель>`
-  opencodego: (raw) => raw.trim().replace(/^opencode(?:-go)?\//i, ''),
   mock: (raw) => raw.trim(),
 };
 
@@ -138,54 +136,40 @@ function withTimeout(outer, ms) {
   };
 }
 
-/**
- * POST на chat completions. `urls` пробуются по очереди, но только если запрос не дошёл до сервера
- * (сеть, CORS). Любой ответ сервера, в том числе ошибка, заканчивает перебор.
- */
-export async function chatCompletion({ label, urls, apiKey, body, signal, onReach }) {
+/** POST на chat completions. Любой ответ сервера, в том числе ошибка, разбирается в понятное сообщение. */
+export async function chatCompletion({ label, url, apiKey, body, signal }) {
   const { signal: guard, done } = withTimeout(signal, REQUEST_TIMEOUT_MS);
   try {
-    const failures = [];
-    for (const url of urls) {
-      let res;
-      try {
-        res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify(body),
-          signal: guard,
-        });
-      } catch (err) {
-        if (guard.aborted) throw err;
-        failures.push(err.message);
-        continue;
-      }
-      const raw = await res.text();
-      let data = null;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        /* не JSON: ниже покажем кусок текста */
-      }
-      if (res.status === 404 && !data) {
-        // HTML-страница 404 вместо JSON: такого маршрута нет (например, прокси при локальном запуске)
-        failures.push(`${url.replace(/^https?:\/\/[^/]+/, '')}: HTTP 404`);
-        continue;
-      }
-      onReach?.(url);
-      const apiMessage = data?.error?.message ?? data?.error ?? data?.message;
-      if (!res.ok) throw httpError(label, res.status, typeof apiMessage === 'string' ? apiMessage : raw);
-      if (data?.error) throw new Error(`${label}: ${typeof apiMessage === 'string' ? apiMessage : 'модель вернула ошибку'}`);
-      if (!data) throw new Error(`${label}: ответ не похож на JSON: ${raw.slice(0, 120)}`);
-      const text = cleanQuote(extractContent(data));
-      if (!text) {
-        throw new Error(
-          `${label}: модель вернула пустой ответ. Думающая модель могла потратить весь лимит токенов на рассуждения, попробуй модель без них`,
-        );
-      }
-      return { text, url };
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal: guard,
+      });
+    } catch (err) {
+      if (guard.aborted) throw err;
+      throw new Error(`${label}: запрос не дошёл до сервера (${err.message})`);
     }
-    throw new Error(`${label}: запрос не дошёл до сервера (${failures.join('; ') || 'нет сети'})`);
+    const raw = await res.text();
+    let data = null;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      /* не JSON: ниже покажем кусок текста */
+    }
+    const apiMessage = data?.error?.message ?? data?.error ?? data?.message;
+    if (!res.ok) throw httpError(label, res.status, typeof apiMessage === 'string' ? apiMessage : raw);
+    if (data?.error) throw new Error(`${label}: ${typeof apiMessage === 'string' ? apiMessage : 'модель вернула ошибку'}`);
+    if (!data) throw new Error(`${label}: ответ не похож на JSON: ${raw.slice(0, 120)}`);
+    const text = cleanQuote(extractContent(data));
+    if (!text) {
+      throw new Error(
+        `${label}: модель вернула пустой ответ. Думающая модель могла потратить весь лимит токенов на рассуждения, попробуй модель без них`,
+      );
+    }
+    return { text };
   } catch (err) {
     if (err?.name === 'AbortError' || err?.name === 'TimeoutError' || guard.aborted) {
       if (signal?.aborted) throw err; // отмену пользователя не маскируем
@@ -199,51 +183,27 @@ export async function chatCompletion({ label, urls, apiKey, body, signal, onReac
 
 /* провайдеры */
 
-function chatProvider({ id, label, urls, onReach }) {
-  return {
-    id,
-    label,
-    ready: true,
-    needsKey: true,
-    async generate(request) {
-      const apiKey = (request.apiKey ?? '').trim();
-      const model = normalizeModel(id, request.model);
-      if (!apiKey) throw new Error(`${label}: вставь API-ключ в настройках`);
-      if (!model) throw new Error(`${label}: впиши название модели в настройках`);
-      const messages = buildMessages(request);
-      const { text } = await chatCompletion({
-        label,
-        urls: urls(),
-        apiKey,
-        body: { model, messages, max_tokens: MAX_TOKENS },
-        signal: request.signal,
-        onReach,
-      });
-      return { text, meta: { provider: id, model, messages } };
-    },
-  };
-}
-
-// Прямой вызов из браузера зависит от CORS на стороне сервиса. Если он не пройдёт, запрос уйдёт через
-// same-origin прокси, который описан в netlify.toml. Сработавший путь запоминаем до перезагрузки страницы.
-const OPENCODE_GO_DIRECT = 'https://opencode.ai/zen/go/v1/chat/completions';
-const OPENCODE_GO_PROXY = '/api/opencode-go/chat/completions';
-let goViaProxy = false;
-
-const openrouter = chatProvider({
+const openrouter = {
   id: 'openrouter',
   label: 'OpenRouter',
-  urls: () => ['https://openrouter.ai/api/v1/chat/completions'],
-});
-
-const opencodego = chatProvider({
-  id: 'opencodego',
-  label: 'OpenCode Go',
-  urls: () => (goViaProxy ? [OPENCODE_GO_PROXY, OPENCODE_GO_DIRECT] : [OPENCODE_GO_DIRECT, OPENCODE_GO_PROXY]),
-  onReach: (url) => {
-    goViaProxy = url === OPENCODE_GO_PROXY;
+  ready: true,
+  needsKey: true,
+  async generate(request) {
+    const apiKey = (request.apiKey ?? '').trim();
+    const model = normalizeModel('openrouter', request.model);
+    if (!apiKey) throw new Error('OpenRouter: вставь API-ключ в настройках');
+    if (!model) throw new Error('OpenRouter: впиши название модели в настройках');
+    const messages = buildMessages(request);
+    const { text } = await chatCompletion({
+      label: 'OpenRouter',
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      apiKey,
+      body: { model, messages, max_tokens: MAX_TOKENS },
+      signal: request.signal,
+    });
+    return { text, meta: { provider: 'openrouter', model, messages } };
   },
-});
+};
 
 const delay = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -271,7 +231,7 @@ const mock = {
   },
 };
 
-export const PROVIDERS = { openrouter, opencodego, mock };
+export const PROVIDERS = { openrouter, mock };
 
 export async function generateQuote(providerId, request) {
   const provider = PROVIDERS[providerId];
