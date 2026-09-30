@@ -85,7 +85,7 @@
         </label>
         <label class="radio">
           <input type="radio" name="source" value="llm">
-          <span>LLM (мок)<small>новая цитата по твоим шаблонам, сети пока нет</small></span>
+          <span>LLM<small>новая цитата от модели по твоим примерам, тема берётся из слота броска</small></span>
         </label>
       </fieldset>
 
@@ -94,24 +94,49 @@
         <select id="provider"></select>
       </div>
 
-      <div class="field">
-        <label for="apiKey">API-ключ</label>
-        <input id="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-or-...">
-        <small>Хранится только в этом браузере (localStorage) и никуда не отправляется. Пока не используется.</small>
+      <div class="provider-group" data-provider="openrouter" hidden>
+        <div class="field">
+          <label for="openrouterKey">Ключ OpenRouter</label>
+          <input id="openrouterKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-or-v1-...">
+        </div>
+        <div class="field">
+          <label for="openrouterModel">Модель</label>
+          <input id="openrouterModel" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="автор/модель, как на openrouter.ai">
+          <small>Скопируй название модели со страницы на openrouter.ai. Ссылка целиком тоже подойдёт.</small>
+        </div>
       </div>
 
-      <div class="field">
-        <label for="model">Модель</label>
-        <input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="например, openai/gpt-4o-mini">
+      <div class="provider-group" data-provider="opencodego" hidden>
+        <div class="field">
+          <label for="opencodegoKey">Токен OpenCode Go</label>
+          <input id="opencodegoKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-...">
+          <small>API-ключ подписки OpenCode Go из консоли opencode.ai.</small>
+        </div>
+        <div class="field">
+          <label for="opencodegoModel">Модель</label>
+          <input id="opencodegoModel" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="id модели из списка OpenCode Go">
+          <small>Приставку opencode-go/ можно оставить, она отрежется сама.</small>
+        </div>
       </div>
 
+      <p class="hint" data-provider="mock" hidden>Мок не ходит в сеть и ключей не просит: возвращает случайный пример из твоего списка. Нужен, чтобы проверять интерфейс.</p>
+
       <div class="field">
-        <label for="examples">Примеры цитат (шаблоны)</label>
-        <textarea id="examples" rows="6" spellcheck="false" placeholder="Одна цитата на строку"></textarea>
-        <small id="examplesCount"></small>
+        <label for="examples">Примеры цитат Стэтхема</label>
+        <label class="dropzone" id="dropzone" for="examplesFile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+          <span class="dropzone-title">Перетащи .txt сюда или тапни, чтобы выбрать файл</span>
+          <small>Можно несколько файлов. Одна цитата на строку, нумерацию, кавычки и подпись уберу сам.</small>
+          <input id="examplesFile" class="visually-hidden" type="file" accept=".txt,.md,.csv,.text,text/plain" multiple>
+        </label>
+        <textarea id="examples" rows="8" spellcheck="false" placeholder="...или вставь сюда, одна цитата на строку"></textarea>
+        <div class="field-row">
+          <small id="examplesCount"></small>
+          <button type="button" id="clearExamples" class="text-btn">Очистить</button>
+        </div>
       </div>
 
-      <button type="button" id="testGen" class="btn">Проверить генерацию (мок)</button>
+      <button type="button" id="testGen" class="btn">Проверить генерацию</button>
       <div class="test-out" id="testOut" hidden>
         <p class="test-text" id="testText"></p>
         <details>
