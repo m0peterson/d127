@@ -1,0 +1,24 @@
+[build]
+  publish = "public"
+
+# Сайт статический, сборка не нужна.
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    # connect-src к openrouter.ai заранее открыт под будущий LLM-модуль.
+    # Пока нет инлайновых скриптов и стилей, XSS не сможет утащить ключ на чужой домен.
+    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"

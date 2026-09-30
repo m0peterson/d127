@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>d127: цитата дня</title>
+  <meta name="description" content="Тапни, брось d127 и d3 одновременно и получи цитату дня из мемного сборника в духе Стэтхема.">
+  <meta name="theme-color" content="#0e0f12">
+  <meta name="color-scheme" content="dark">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="d127">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <h1 class="brand">d127<span class="brand-x">×</span>d3</h1>
+      <button type="button" id="openSettings" class="icon-btn" aria-label="Настройки">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      </button>
+    </header>
+
+    <main class="main">
+      <section class="dice" aria-label="Кубики">
+        <div class="die die-127" id="die127">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <polygon class="die-body" points="50,4 90,27 90,73 50,96 10,73 10,27"/>
+            <polygon class="die-facet" points="50,22 74,37 74,63 50,78 26,63 26,37"/>
+            <path class="die-facet" d="M50 4V22M90 27L74 37M90 73L74 63M50 96V78M10 73L26 63M10 27L26 37"/>
+          </svg>
+          <span class="die-value" id="val127">?</span>
+          <span class="die-label">d127</span>
+        </div>
+        <div class="die die-3" id="die3">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <polygon class="die-body" points="50,8 94,88 6,88"/>
+            <polygon class="die-facet" points="50,36 74,80 26,80"/>
+            <path class="die-facet" d="M50 8V36M94 88L74 80M6 88L26 80"/>
+          </svg>
+          <span class="die-value" id="val3">?</span>
+          <span class="die-label">d3</span>
+        </div>
+      </section>
+
+      <p class="slot" id="slot">Слот: ? из 381</p>
+
+      <article class="card" id="card" aria-live="polite">
+        <p class="card-date" id="qdate">Цитата дня</p>
+        <blockquote class="card-text" id="qtext">Тапни кнопку внизу. Кубики решат, что тебе сегодня скажут.</blockquote>
+        <p class="card-src" id="qsrc">по мотивам Стэтхема</p>
+        <button type="button" id="shareBtn" class="text-btn" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+          <span>Поделиться</span>
+        </button>
+      </article>
+    </main>
+
+    <footer class="dock">
+      <button type="button" id="rollBtn" class="roll">Бросить кубики</button>
+      <p class="disclaimer">Мемные цитаты. Не являются словами Джейсона Стэтхэма.</p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="settings" aria-labelledby="settingsTitle">
+    <div class="sheet">
+      <header class="sheet-head">
+        <h2 id="settingsTitle">Настройки</h2>
+        <button type="button" id="closeSettings" class="icon-btn" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+
+      <fieldset class="field">
+        <legend>Источник цитаты</legend>
+        <label class="radio">
+          <input type="radio" name="source" value="collection">
+          <span>Сборник<small>381 цитата, слот = (d127 - 1) × 3 + d3</small></span>
+        </label>
+        <label class="radio">
+          <input type="radio" name="source" value="llm">
+          <span>LLM (мок)<small>новая цитата по твоим шаблонам, сети пока нет</small></span>
+        </label>
+      </fieldset>
+
+      <div class="field">
+        <label for="provider">Провайдер</label>
+        <select id="provider"></select>
+      </div>
+
+      <div class="field">
+        <label for="apiKey">API-ключ</label>
+        <input id="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-or-...">
+        <small>Хранится только в этом браузере (localStorage) и никуда не отправляется. Пока не используется.</small>
+      </div>
+
+      <div class="field">
+        <label for="model">Модель</label>
+        <input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="например, openai/gpt-4o-mini">
+      </div>
+
+      <div class="field">
+        <label for="examples">Примеры цитат (шаблоны)</label>
+        <textarea id="examples" rows="6" spellcheck="false" placeholder="Одна цитата на строку"></textarea>
+        <small id="examplesCount"></small>
+      </div>
+
+      <button type="button" id="testGen" class="btn">Проверить генерацию (мок)</button>
+      <div class="test-out" id="testOut" hidden>
+        <p class="test-text" id="testText"></p>
+        <details>
+          <summary>Что уйдёт в модель</summary>
+          <pre id="testPrompt"></pre>
+        </details>
+      </div>
+
+      <button type="button" id="resetSettings" class="btn btn-danger">Стереть ключ и настройки</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
