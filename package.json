@@ -1,0 +1,8 @@
+{
+  "name": "d127",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
