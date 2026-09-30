@@ -138,7 +138,7 @@ async function roll() {
 
 async function share() {
   if (!current) return;
-  const text = `«${current.text}»\n\nd127: ${current.d127}, d3: ${current.d3}. Мемная цитата в духе Стэтхема.`;
+  const text = `«${current.text}»\n\nСтраница ${current.d127}, строка ${current.d3}. Мемная цитата в духе Стэтхема.`;
   if (navigator.share) {
     try {
       await navigator.share({ title: 'd127: цитата дня', text, url: location.href });

@@ -36,7 +36,7 @@ export function buildMessages({ d127, d3, anchor, examples }) {
     { role: 'system', content: SYSTEM_PROMPT },
     {
       role: 'user',
-      content: `Примеры:\n${shots}\n\n${topic}\nБросок: d127 = ${d127}, d3 = ${d3}.\nВерни только текст цитаты.`,
+      content: `Примеры:\n${shots}\n\n${topic}\nБросок: страница = ${d127}, строка = ${d3}.\nВерни только текст цитаты.`,
     },
   ];
 }
