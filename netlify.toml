@@ -3,6 +3,15 @@
 
 # Сайт статический, сборка не нужна.
 
+# Запасной путь для OpenCode Go: если браузер не смог позвонить на opencode.ai напрямую (CORS),
+# js/llm.js повторяет запрос сюда, а Netlify пересылает его дальше. Ключ идёт в заголовке Authorization
+# и нигде не сохраняется. Свой ключ к прокси нужен любому, кто им пользуется.
+[[redirects]]
+  from = "/api/opencode-go/*"
+  to = "https://opencode.ai/zen/go/v1/:splat"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/sw.js"
   [headers.values]
@@ -19,6 +28,6 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-Frame-Options = "DENY"
-    # connect-src к openrouter.ai заранее открыт под будущий LLM-модуль.
-    # Пока нет инлайновых скриптов и стилей, XSS не сможет утащить ключ на чужой домен.
-    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    # connect-src открыт только под два LLM-провайдера. Пока нет инлайновых скриптов и стилей,
+    # XSS не сможет утащить ключ на чужой домен.
+    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://openrouter.ai https://opencode.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"

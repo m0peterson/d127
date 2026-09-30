@@ -1,7 +1,9 @@
 import { rollBoth, randomInt, D127, D3 } from './dice.js';
 import { loadQuotes, pickQuote, SLOTS } from './quotes.js';
-import { loadSettings, saveSettings, resetSettings, exampleList, loadLast, saveLast } from './settings.js';
-import { PROVIDERS, generateQuote } from './llm.js';
+import {
+  loadSettings, saveSettings, resetSettings, exampleList, parseExamples, providerCreds, loadLast, saveLast,
+} from './settings.js';
+import { PROVIDERS, generateQuote, normalizeModel } from './llm.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -9,7 +11,8 @@ const els = {
   slot: $('slot'), card: $('card'), qdate: $('qdate'), qtext: $('qtext'), qsrc: $('qsrc'),
   roll: $('rollBtn'), share: $('shareBtn'), toast: $('toast'),
   dialog: $('settings'), openSettings: $('openSettings'), closeSettings: $('closeSettings'),
-  provider: $('provider'), apiKey: $('apiKey'), model: $('model'), examples: $('examples'),
+  provider: $('provider'), examples: $('examples'), examplesFile: $('examplesFile'),
+  dropzone: $('dropzone'), clearExamples: $('clearExamples'),
   examplesCount: $('examplesCount'), testGen: $('testGen'), testOut: $('testOut'),
   testText: $('testText'), testPrompt: $('testPrompt'), resetSettings: $('resetSettings'),
 };
@@ -22,13 +25,17 @@ let current = null; // последний показанный бросок
 let busy = false;
 let toastTimer;
 
+const MAX_FILE_BYTES = 1024 * 1024;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function toast(message) {
   els.toast.textContent = message;
   els.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2600);
+  // длинные сообщения об ошибках читаются дольше
+  const ms = Math.min(9000, Math.max(2600, message.length * 55));
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
 }
 
 async function ensureQuotes() {
@@ -43,12 +50,18 @@ function renderDice(d127, d3) {
   els.val3.textContent = d3;
 }
 
+function sourceLabel(result) {
+  if (result.source === 'collection') return 'по мотивам Стэтхема';
+  if (result.source === 'llm:mock') return 'мок LLM в духе Стэтхема';
+  return result.model ? `сочинила модель ${result.model}` : 'сочинила LLM в духе Стэтхема';
+}
+
 function renderResult(result, { animate = false } = {}) {
   renderDice(result.d127, result.d3);
   els.slot.textContent = `Слот ${result.slot} из ${SLOTS}`;
   els.qdate.textContent = `Цитата дня · ${dateFormat.format(result.ts)}`;
   els.qtext.textContent = result.text;
-  els.qsrc.textContent = result.source === 'collection' ? 'по мотивам Стэтхема' : 'мок LLM в духе Стэтхема';
+  els.qsrc.textContent = sourceLabel(result);
   els.card.classList.remove('empty');
   els.share.hidden = false;
   if (animate) {
@@ -74,18 +87,16 @@ function tumble(on) {
   }
 }
 
+function llmRequest(settings, anchor) {
+  return { anchor, examples: exampleList(settings), ...providerCreds(settings, settings.provider) };
+}
+
 async function resolveQuote({ d127, d3 }, settings) {
   const anchor = pickQuote(quotes, d127, d3);
   if (settings.source !== 'llm') return { text: anchor.text, source: 'collection', slot: anchor.slot };
   try {
-    const res = await generateQuote(settings.provider, {
-      d127, d3,
-      anchor: anchor.text,
-      examples: exampleList(settings),
-      apiKey: settings.apiKey,
-      model: settings.model,
-    });
-    return { text: res.text, source: `llm:${settings.provider}`, slot: anchor.slot };
+    const res = await generateQuote(settings.provider, llmRequest(settings, anchor.text));
+    return { text: res.text, source: `llm:${settings.provider}`, model: res.meta.model, slot: anchor.slot };
   } catch (err) {
     toast(`LLM не ответила, показан сборник: ${err.message}`);
     return { text: anchor.text, source: 'collection', slot: anchor.slot };
@@ -158,25 +169,126 @@ async function share() {
 /* настройки */
 
 function syncExamplesCount() {
-  els.examplesCount.textContent = `Примеров: ${exampleList({ examples: els.examples.value }).length}`;
+  const count = parseExamples(els.examples.value).length;
+  els.examplesCount.textContent = `Примеров: ${count}`;
+  els.clearExamples.hidden = !els.examples.value;
+}
+
+function showProviderGroup(providerId) {
+  for (const group of document.querySelectorAll('[data-provider]')) {
+    group.hidden = group.dataset.provider !== providerId;
+  }
 }
 
 function fillSettingsForm() {
   const s = loadSettings();
   for (const radio of document.querySelectorAll('input[name="source"]')) radio.checked = radio.value === s.source;
-  els.provider.value = s.provider;
-  els.apiKey.value = s.apiKey;
-  els.model.value = s.model;
+  els.provider.value = PROVIDERS[s.provider] ? s.provider : 'openrouter';
+  for (const p of Object.values(PROVIDERS)) {
+    if (!p.needsKey) continue;
+    $(`${p.id}Key`).value = s[`${p.id}Key`];
+    $(`${p.id}Model`).value = s[`${p.id}Model`];
+  }
+  showProviderGroup(els.provider.value);
   els.examples.value = s.examples;
   syncExamplesCount();
 }
 
-function initSettings() {
-  for (const p of Object.values(PROVIDERS)) {
-    const option = new Option(p.label, p.id);
-    option.disabled = !p.ready;
-    els.provider.append(option);
+function saveOrWarn(patch) {
+  if (!saveSettings(patch)) toast('Браузер не дал сохранить настройки: кончилось место или включён приватный режим');
+}
+
+/* примеры цитат: файлы, перетаскивание, вставка */
+
+async function readTextFile(file) {
+  const bytes = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('windows-1251').decode(bytes); // старые русские .txt
   }
+}
+
+const isTextFile = (file) => file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
+
+/** Дописывает в поле только те цитаты, которых там ещё нет. Уже набранный текст не трогает. */
+function appendExamples(text) {
+  const have = new Set(parseExamples(els.examples.value));
+  const fresh = parseExamples(text).filter((line) => !have.has(line));
+  if (fresh.length) {
+    const current = els.examples.value.replace(/\s+$/, '');
+    els.examples.value = (current ? `${current}\n` : '') + fresh.join('\n');
+    saveOrWarn({ examples: els.examples.value });
+    syncExamplesCount();
+  }
+  return fresh.length;
+}
+
+async function addExamplesFromFiles(fileList) {
+  const chunks = [];
+  const skipped = [];
+  for (const file of fileList) {
+    if (!isTextFile(file)) skipped.push(`${file.name} (не текст)`);
+    else if (file.size > MAX_FILE_BYTES) skipped.push(`${file.name} (больше 1 МБ)`);
+    else chunks.push(await readTextFile(file));
+  }
+  const added = chunks.length ? appendExamples(chunks.join('\n')) : 0;
+  const parts = [];
+  if (chunks.length) parts.push(added ? `Добавлено цитат: ${added}` : 'Новых цитат нет, всё уже в списке');
+  if (skipped.length) parts.push(`Пропущено: ${skipped.join(', ')}`);
+  toast(parts.join('. '));
+}
+
+function initDropzone() {
+  const zone = els.dropzone;
+  const hasFiles = (e) => e.dataTransfer?.types?.includes('Files');
+
+  // Файл, брошенный мимо зоны, иначе открылся бы в этой же вкладке и увёл бы со страницы
+  for (const type of ['dragover', 'drop']) {
+    window.addEventListener(type, (e) => {
+      if (hasFiles(e)) e.preventDefault();
+    });
+  }
+
+  zone.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', (e) => {
+    if (!e.relatedTarget || !zone.contains(e.relatedTarget)) zone.classList.remove('dragover');
+  });
+  zone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const files = [...(e.dataTransfer?.files ?? [])];
+    if (files.length) {
+      await addExamplesFromFiles(files);
+      return;
+    }
+    const text = e.dataTransfer?.getData('text/plain'); // выделенный текст, перетащенный из другой вкладки
+    if (text) toast(appendExamples(text) ? 'Текст добавлен' : 'Новых цитат нет, всё уже в списке');
+  });
+
+  els.examplesFile.addEventListener('change', async () => {
+    const files = [...els.examplesFile.files];
+    els.examplesFile.value = ''; // чтобы тот же файл можно было выбрать ещё раз
+    if (files.length) await addExamplesFromFiles(files);
+  });
+
+  els.clearExamples.addEventListener('click', () => {
+    if (!confirm('Стереть весь список примеров?')) return;
+    els.examples.value = '';
+    saveOrWarn({ examples: '' });
+    syncExamplesCount();
+  });
+}
+
+function initSettings() {
+  for (const p of Object.values(PROVIDERS)) els.provider.append(new Option(p.label, p.id));
   fillSettingsForm();
 
   els.openSettings.addEventListener('click', () => {
@@ -190,19 +302,35 @@ function initSettings() {
   });
 
   for (const radio of document.querySelectorAll('input[name="source"]')) {
-    radio.addEventListener('change', () => saveSettings({ source: radio.value }));
+    radio.addEventListener('change', () => saveOrWarn({ source: radio.value }));
   }
-  els.provider.addEventListener('change', () => saveSettings({ provider: els.provider.value }));
-  els.apiKey.addEventListener('input', () => saveSettings({ apiKey: els.apiKey.value.trim() }));
-  els.model.addEventListener('input', () => saveSettings({ model: els.model.value.trim() }));
+  els.provider.addEventListener('change', () => {
+    saveOrWarn({ provider: els.provider.value });
+    showProviderGroup(els.provider.value);
+  });
+
+  for (const p of Object.values(PROVIDERS)) {
+    if (!p.needsKey) continue;
+    const key = $(`${p.id}Key`);
+    const model = $(`${p.id}Model`);
+    key.addEventListener('input', () => saveOrWarn({ [`${p.id}Key`]: key.value.trim() }));
+    model.addEventListener('input', () => saveOrWarn({ [`${p.id}Model`]: model.value.trim() }));
+    // после вставки приводим к чистому id: из ссылки, с приставкой и т.п.
+    model.addEventListener('change', () => {
+      model.value = normalizeModel(p.id, model.value);
+      saveOrWarn({ [`${p.id}Model`]: model.value });
+    });
+  }
+
   els.examples.addEventListener('input', () => {
-    saveSettings({ examples: els.examples.value });
+    saveOrWarn({ examples: els.examples.value });
     syncExamplesCount();
   });
+  initDropzone();
 
   els.testGen.addEventListener('click', testGeneration);
   els.resetSettings.addEventListener('click', () => {
-    if (!confirm('Стереть API-ключ, модель и примеры цитат из этого браузера?')) return;
+    if (!confirm('Стереть ключи, модели и примеры цитат из этого браузера?')) return;
     resetSettings();
     fillSettingsForm();
     els.testOut.hidden = true;
@@ -220,12 +348,7 @@ async function testGeneration() {
   try {
     await ensureQuotes().catch(() => {}); // якорь необязателен
     const anchor = quotes.length ? pickQuote(quotes, d127, d3).text : undefined;
-    const res = await generateQuote(settings.provider, {
-      d127, d3, anchor,
-      examples: exampleList(settings),
-      apiKey: settings.apiKey,
-      model: settings.model,
-    });
+    const res = await generateQuote(settings.provider, llmRequest(settings, anchor));
     els.testText.textContent = res.text;
     els.testPrompt.textContent = JSON.stringify(res.meta.messages, null, 2);
   } catch (err) {
