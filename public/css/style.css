@@ -7,7 +7,6 @@
   --muted: #8b90a0;
   --accent: #f5a524;
   --accent-ink: #1a1203;
-  --danger: #ff6b5e;
   --radius: 20px;
   --serif: ui-serif, Georgia, "Times New Roman", serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -344,7 +343,7 @@ dialog::backdrop { background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(3px); 
   border: 0;
   min-width: 0;
 }
-.field > label, .field > legend {
+.field > legend {
   padding: 0;
   font-size: 0.85rem;
   font-weight: 600;
@@ -352,70 +351,7 @@ dialog::backdrop { background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(3px); 
 }
 .field small, .radio small { color: var(--muted); font-size: 0.78rem; }
 
-.field input[type="text"], .field input[type="password"], .field select, .field textarea {
-  width: 100%;
-  min-height: 48px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--bg);
-  font-size: 16px; /* меньше 16px iOS зумит страницу при фокусе */
-}
-.field textarea { resize: vertical; line-height: 1.4; }
-
-.field-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.field-row .text-btn { margin: -8px -8px -8px 0; }
-
-.provider-group { display: flex; flex-direction: column; gap: 18px; }
-.provider-group[hidden], .hint[hidden] { display: none; }
 .hint { margin: 0; color: var(--muted); font-size: 0.85rem; }
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.field > .dropzone {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 18px 14px;
-  border: 1.5px dashed var(--line);
-  border-radius: 14px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 0.95rem;
-  font-weight: 600;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-.dropzone svg {
-  width: 28px;
-  height: 28px;
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.dropzone small { font-weight: 400; }
-.dropzone:hover, .dropzone.dragover { border-color: var(--accent); }
-.dropzone.dragover { background: var(--surface-2); }
-.dropzone:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 .radio {
   display: flex;
@@ -432,35 +368,6 @@ dialog::backdrop { background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(3px); 
 .radio span { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
 .radio span small { font-weight: 400; }
 .radio:has(input:checked) { border-color: var(--accent); }
-
-.btn {
-  min-height: 48px;
-  padding: 0 18px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface-2);
-  font-weight: 600;
-}
-.btn:hover { border-color: var(--muted); }
-.btn-danger { color: var(--danger); background: none; }
-
-.test-out {
-  padding: 14px;
-  border: 1px dashed var(--line);
-  border-radius: 14px;
-}
-.test-out[hidden] { display: none; }
-.test-text { margin: 0 0 10px; font: italic 500 1.05rem/1.35 var(--serif); }
-.test-out summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
-.test-out pre {
-  margin: 10px 0 0;
-  max-height: 220px;
-  overflow: auto;
-  font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--muted);
-}
 
 /* большие экраны */
 
