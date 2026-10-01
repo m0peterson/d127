@@ -37,6 +37,15 @@ test('успех: текст обрезается по краям, на серв
   assert.deepEqual(JSON.parse(sent.init.body), { d127: 5, d3: 2 });
 });
 
+test('свои примеры уходят на сервер только когда они есть', async () => {
+  serverAnswers(200, { text: 'ок' });
+  await generateQuote({ d127: 1, d3: 1, examples: ['раз', 'два'] });
+  assert.deepEqual(JSON.parse(sent.init.body), { d127: 1, d3: 1, examples: ['раз', 'два'] });
+
+  await generateQuote({ d127: 1, d3: 1, examples: [] });
+  assert.deepEqual(JSON.parse(sent.init.body), { d127: 1, d3: 1 });
+});
+
 test('503 «не настроена» и 503 «сборник недоступен» различаются', async () => {
   serverAnswers(503, { error: 'Генерация не настроена на сервере', code: 'not_configured' });
   assert.equal(await reasonShown(), 'генерация не настроена на сервере');

@@ -14,6 +14,36 @@ export function parseQuotes(text) {
     .filter((line) => line && !line.startsWith('#'));
 }
 
+/** Пределы для своих примеров. Одни и те же числа держат и браузер, и функция, поэтому живут здесь. */
+export const MAX_EXAMPLES = 300;
+export const MAX_EXAMPLE_CHARS = 300;
+
+const LIST_MARK = /^(?:\d{1,4}[.)]|[-•*·])\s+/;
+
+/**
+ * Приводит строки к виду, в котором их можно отдавать модели: без управляющих символов, нумерации и маркеров списка,
+ * без пустых, закомментированных и повторяющихся, не длиннее предела, не больше MAX_EXAMPLES штук.
+ */
+export function normalizeExamples(lines) {
+  const seen = new Set();
+  const result = [];
+  for (const raw of lines) {
+    const line = String(raw)
+      .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(LIST_MARK, '');
+    if (!line || line.startsWith('#') || seen.has(line)) continue;
+    seen.add(line);
+    result.push(line.slice(0, MAX_EXAMPLE_CHARS));
+    if (result.length >= MAX_EXAMPLES) break;
+  }
+  return result;
+}
+
+/** Текст из поля настроек: одна цитата на строку. */
+export const parseExamples = (text) => normalizeExamples(String(text ?? '').split(/\r?\n/));
+
 export async function loadQuotes(url = 'data/quotes.txt') {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`quotes.txt: HTTP ${res.status}`);
