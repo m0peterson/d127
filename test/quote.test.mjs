@@ -106,12 +106,25 @@ test('без настройки: 503 и ни одного запроса к пр
   assert.equal(upstream.length, 0);
 });
 
+test('без настройки: клиент получает код причины, а лог владельца перечисляет все проблемы сразу', async () => {
+  env = { LLM_PROVIDER: 'openrouter' }; // нет ни ключа, ни модели
+  const res = await call({ d127: 1, d3: 1 });
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: 'Генерация не настроена на сервере', code: 'not_configured' });
+
+  const logged = console.error.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
+  assert.match(logged, /LLM_API_KEY/);
+  assert.match(logged, /LLM_MODEL/);
+  assert.match(logged, /новым деплоям/); // подсказка, что после правки переменных нужен деплой
+});
+
 test('ошибка провайдера: посетителю нейтральный 502, ключ не утекает и в логи', async () => {
   upstreamReply = () => Response.json({ error: { message: `Invalid key ${SECRET}` } }, { status: 401 });
   const res = await call({ d127: 1, d3: 1 });
   assert.equal(res.status, 502);
   const text = await res.text();
   assert.ok(!text.includes(SECRET) && !text.includes('Invalid key'));
+  assert.equal(JSON.parse(text).code, 'model_failed');
   const logged = console.error.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
   assert.match(logged, /HTTP 401/);
   assert.ok(!logged.includes(SECRET), 'ключ попал в лог');

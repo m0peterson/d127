@@ -8,13 +8,21 @@
 const ENDPOINT = '/api/quote';
 const REQUEST_TIMEOUT_MS = 30_000;
 
+// Причина от самой функции (поле code в её JSON). По статусу её не угадать: 503 бывает и «не настроена», и «нет сборника»
+const CODE_HINTS = new Map([
+  ['not_configured', 'генерация не настроена на сервере'],
+  ['collection_unavailable', 'сервер не смог загрузить сборник цитат'],
+  ['model_failed', 'модель не ответила'],
+]);
+
+// Запасной вариант, когда кода нет, то есть ответила не наша функция, а платформа (страница Netlify про лимит, HTML 404)
 const STATUS_HINTS = {
   404: 'на этом хосте нет серверной функции (локально её запускает netlify dev)',
   405: 'сервер не принял запрос',
   413: 'запрос слишком большой',
   429: 'слишком много запросов, подожди минуту',
   502: 'модель не ответила',
-  503: 'генерация не настроена на сервере',
+  503: 'сервер сейчас недоступен',
 };
 
 export async function generateQuote({ d127, d3 }) {
@@ -30,7 +38,7 @@ export async function generateQuote({ d127, d3 }) {
     // при ошибках ответ может быть не нашим JSON (страница Netlify про лимит, HTML 404), поэтому парсим осторожно
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      const hint = STATUS_HINTS[res.status] ?? data?.error ?? `ошибка сервера (HTTP ${res.status})`;
+      const hint = CODE_HINTS.get(data?.code) ?? STATUS_HINTS[res.status] ?? data?.error ?? `ошибка сервера (HTTP ${res.status})`;
       throw new Error(hint);
     }
     const text = typeof data?.text === 'string' ? data.text.trim() : '';
