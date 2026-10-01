@@ -12,28 +12,11 @@
  */
 
 import { D127, D3 } from '../../public/js/dice.js';
-import { parseQuotes, pickQuote } from '../../public/js/quotes.js';
+import { pickQuote } from '../../public/js/quotes.js';
+import { loadCollection } from '../lib/collection.mjs';
 import { LlmError, PROVIDER_IDS, generateQuote } from '../lib/llm.mjs';
 
 const MAX_BODY_BYTES = 1024;
-
-// Сборник берём с самого сайта: так путь один и тот же локально и на Netlify. Кэшируем на время жизни инстанса.
-let collection = null;
-
-function loadCollection(origin) {
-  collection ??= fetch(new URL('/data/quotes.txt', origin))
-    .then(async (res) => {
-      if (!res.ok) throw new Error(`quotes.txt: HTTP ${res.status}`);
-      const quotes = parseQuotes(await res.text());
-      if (!quotes.length) throw new Error('quotes.txt пустой');
-      return quotes;
-    })
-    .catch((err) => {
-      collection = null; // не запоминаем неудачу
-      throw err;
-    });
-  return collection;
-}
 
 function reply(status, body, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -68,16 +51,20 @@ export default async (req) => {
   const provider = (Netlify.env.get('LLM_PROVIDER') || 'openrouter').trim().toLowerCase();
   const apiKey = (Netlify.env.get('LLM_API_KEY') || '').trim();
   const model = (Netlify.env.get('LLM_MODEL') || '').trim();
-  const configError = !PROVIDER_IDS.includes(provider)
-    ? `LLM_PROVIDER=«${provider}» неизвестен, допустимы ${PROVIDER_IDS.join(', ')}`
-    : provider !== 'mock' && !apiKey
-      ? 'не задана переменная LLM_API_KEY'
-      : provider !== 'mock' && !model
-        ? 'не задана переменная LLM_MODEL'
-        : null;
-  if (configError) {
-    console.error(`Функция quote не настроена: ${configError}`);
-    return reply(503, { error: 'Генерация не настроена на сервере' });
+  const problems = [];
+  if (!PROVIDER_IDS.includes(provider)) {
+    problems.push(`LLM_PROVIDER=«${provider}» неизвестен, допустимы ${PROVIDER_IDS.join(', ')}`);
+  } else if (provider !== 'mock') {
+    if (!apiKey) problems.push('не задана переменная LLM_API_KEY');
+    if (!model) problems.push('не задана переменная LLM_MODEL');
+  }
+  if (problems.length) {
+    // Посетителю причина не нужна, а владельцу нужна вся сразу: каждая правка переменной требует нового деплоя
+    console.error(
+      `Функция quote не настроена: ${problems.join('; ')}. ` +
+        'Значения переменных Netlify применяются только к новым деплоям: если переменная уже добавлена, задеплой сайт заново.',
+    );
+    return reply(503, { error: 'Генерация не настроена на сервере', code: 'not_configured' });
   }
 
   let quotes;
@@ -85,7 +72,7 @@ export default async (req) => {
     quotes = await loadCollection(new URL(req.url).origin);
   } catch (err) {
     console.error(`Не удалось загрузить сборник: ${err.message}`);
-    return reply(503, { error: 'Сборник недоступен на сервере' });
+    return reply(503, { error: 'Сборник недоступен на сервере', code: 'collection_unavailable' });
   }
 
   const anchor = pickQuote(quotes, d127, d3);
@@ -100,7 +87,7 @@ export default async (req) => {
     const message = String(err.message);
     const detail = apiKey ? message.replaceAll(apiKey, '***') : message;
     console.error(`LLM (${provider}) не ответила${err instanceof LlmError && err.status ? `, HTTP ${err.status}` : ''}: ${detail}`);
-    return reply(502, { error: 'Модель не ответила' });
+    return reply(502, { error: 'Модель не ответила', code: 'model_failed' });
   }
 };
 
