@@ -7,7 +7,6 @@
   --muted: #8b90a0;
   --accent: #f5a524;
   --accent-ink: #1a1203;
-  --danger: #ff6b5e;
   --radius: 20px;
   --serif: ui-serif, Georgia, "Times New Roman", serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -344,7 +343,7 @@ dialog::backdrop { background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(3px); 
   border: 0;
   min-width: 0;
 }
-.field > label, .field > legend {
+.field > legend {
   padding: 0;
   font-size: 0.85rem;
   font-weight: 600;
@@ -352,16 +351,7 @@ dialog::backdrop { background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(3px); 
 }
 .field small, .radio small { color: var(--muted); font-size: 0.78rem; }
 
-.field input[type="text"], .field input[type="password"], .field select, .field textarea {
-  width: 100%;
-  min-height: 48px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--bg);
-  font-size: 16px; /* меньше 16px iOS зумит страницу при фокусе */
-}
-.field textarea { resize: vertical; line-height: 1.4; }
+.hint { margin: 0; color: var(--muted); font-size: 0.85rem; }
 
 .radio {
   display: flex;
@@ -378,35 +368,6 @@ dialog::backdrop { background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(3px); 
 .radio span { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
 .radio span small { font-weight: 400; }
 .radio:has(input:checked) { border-color: var(--accent); }
-
-.btn {
-  min-height: 48px;
-  padding: 0 18px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface-2);
-  font-weight: 600;
-}
-.btn:hover { border-color: var(--muted); }
-.btn-danger { color: var(--danger); background: none; }
-
-.test-out {
-  padding: 14px;
-  border: 1px dashed var(--line);
-  border-radius: 14px;
-}
-.test-out[hidden] { display: none; }
-.test-text { margin: 0 0 10px; font: italic 500 1.05rem/1.35 var(--serif); }
-.test-out summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
-.test-out pre {
-  margin: 10px 0 0;
-  max-height: 220px;
-  overflow: auto;
-  font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--muted);
-}
 
 /* большие экраны */
 

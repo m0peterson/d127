@@ -1,82 +1,54 @@
 /**
- * Модуль генерации цитат через LLM. Сейчас работает только мок.
+ * Клиент LLM-генерации. Сама генерация идёт на сервере: netlify/functions/quote.mjs.
+ * Ключа, модели и промпта в браузере нет, отправляются только числа броска.
  *
- * Контракт провайдера:
- *   generate(request) -> Promise<{ text: string, meta: object }>
- *
- * request = {
- *   d127, d3,        результат броска
- *   anchor,          цитата из сборника в этом слоте (тема-якорь), может быть undefined
- *   examples,        string[] шаблоны цитат, которые пользователь залил в настройках
- *   apiKey, model,   из настроек
- *   signal,          AbortSignal, необязательный
- * }
- *
- * Чтобы подключить настоящий провайдер:
- *   1. реализуй generate() у записи `openrouter` ниже и поставь ready: true;
- *   2. в netlify.toml CSP уже разрешает connect-src к openrouter.ai;
- *   3. app.js и настройки менять не нужно, они ходят только через generateQuote().
+ *   generateQuote({ d127, d3 }) -> Promise<string>
  */
 
-export const SYSTEM_PROMPT = [
-  'Ты пишешь короткие мемные цитаты дня в стиле сборника цитат Стэтхема:',
-  'сухо, жёстко, по делу, без мата, одна-две фразы.',
-  'Ниже примеры. Копировать их нельзя, нужна новая цитата в том же духе.',
-].join(' ');
+const ENDPOINT = '/api/quote';
+const REQUEST_TIMEOUT_MS = 30_000;
 
-/** Собирает сообщения в формате chat completions. Один и тот же промпт для любого провайдера. */
-export function buildMessages({ d127, d3, anchor, examples }) {
-  const shots = examples.length
-    ? examples.map((line, i) => `${i + 1}. ${line}`).join('\n')
-    : '(примеров нет, опирайся на стиль из инструкции)';
-  const topic = anchor
-    ? `Тема-якорь (не повторяй дословно, только тема и настроение): «${anchor}»`
-    : 'Тема свободная.';
-  return [
-    { role: 'system', content: SYSTEM_PROMPT },
-    {
-      role: 'user',
-      content: `Примеры:\n${shots}\n\n${topic}\nБросок: страница = ${d127}, строка = ${d3}.\nВерни только текст цитаты.`,
-    },
-  ];
-}
+// Причина от самой функции (поле code в её JSON). По статусу её не угадать: 503 бывает и «не настроена», и «нет сборника»
+const CODE_HINTS = new Map([
+  ['not_configured', 'генерация не настроена на сервере'],
+  ['collection_unavailable', 'сервер не смог загрузить сборник цитат'],
+  ['model_failed', 'модель не ответила'],
+]);
 
-const delay = (ms, signal) =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    });
-  });
-
-async function mockGenerate(request) {
-  await delay(700, request.signal);
-  const messages = buildMessages(request);
-  const pool = request.examples.length ? request.examples : [request.anchor].filter(Boolean);
-  const text = pool.length
-    ? pool[(request.d127 * 3 + request.d3) % pool.length]
-    : 'Мок работает, но примеров нет. Добавь цитаты в настройках, и тут появится что-нибудь осмысленное.';
-  return { text, meta: { provider: 'mock', mock: true, model: request.model || 'mock', messages } };
-}
-
-async function openrouterGenerate() {
-  // Заготовка для настоящей интеграции:
-  //   POST https://openrouter.ai/api/v1/chat/completions
-  //   Authorization: Bearer <apiKey>
-  //   body: { model, messages: buildMessages(request) }
-  //   ответ: choices[0].message.content
-  throw new Error('OpenRouter ещё не подключён. Реализуй generate() в js/llm.js.');
-}
-
-export const PROVIDERS = {
-  mock: { id: 'mock', label: 'Мок (без сети)', ready: true, generate: mockGenerate },
-  openrouter: { id: 'openrouter', label: 'OpenRouter (скоро)', ready: false, generate: openrouterGenerate },
+// Запасной вариант, когда кода нет, то есть ответила не наша функция, а платформа (страница Netlify про лимит, HTML 404)
+const STATUS_HINTS = {
+  404: 'на этом хосте нет серверной функции (локально её запускает netlify dev)',
+  405: 'сервер не принял запрос',
+  413: 'запрос слишком большой',
+  429: 'слишком много запросов, подожди минуту',
+  502: 'модель не ответила',
+  503: 'сервер сейчас недоступен',
 };
 
-export async function generateQuote(providerId, request) {
-  const provider = PROVIDERS[providerId];
-  if (!provider) throw new Error(`Неизвестный провайдер: ${providerId}`);
-  if (!provider.ready) throw new Error(`${provider.label}: провайдер пока не подключён`);
-  return provider.generate(request);
+export async function generateQuote({ d127, d3 }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ d127, d3 }),
+      signal: controller.signal,
+    });
+    // при ошибках ответ может быть не нашим JSON (страница Netlify про лимит, HTML 404), поэтому парсим осторожно
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const hint = CODE_HINTS.get(data?.code) ?? STATUS_HINTS[res.status] ?? data?.error ?? `ошибка сервера (HTTP ${res.status})`;
+      throw new Error(hint);
+    }
+    const text = typeof data?.text === 'string' ? data.text.trim() : '';
+    if (!text) throw new Error('сервер вернул пустой ответ');
+    return text;
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error(`нет ответа за ${REQUEST_TIMEOUT_MS / 1000} секунд`);
+    if (err instanceof TypeError) throw new Error('нет связи с сервером');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }

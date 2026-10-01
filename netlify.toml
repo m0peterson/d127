@@ -1,7 +1,15 @@
 [build]
   publish = "public"
 
-# Сайт статический, сборка не нужна.
+# Сайт статический, сборка не нужна. Функция netlify/functions/quote.mjs подхватывается сама
+# (папка functions по умолчанию) и отвечает на /api/quote: путь и лимит запросов заданы в её коде.
+# LLM-ключ, провайдер и модель лежат в переменных окружения Netlify (LLM_API_KEY, LLM_PROVIDER, LLM_MODEL),
+# в репозитории их нет.
+
+[functions]
+  # Сборник кладётся внутрь пакета функции и читается с диска. Раньше функция скачивала его с собственного сайта:
+  # на закрытых превью (вход в Netlify, пароль) такой запрос не проходит, и LLM не работает.
+  included_files = ["public/data/quotes.txt"]
 
 [[headers]]
   for = "/sw.js"
@@ -19,6 +27,5 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-Frame-Options = "DENY"
-    # connect-src к openrouter.ai заранее открыт под будущий LLM-модуль.
-    # Пока нет инлайновых скриптов и стилей, XSS не сможет утащить ключ на чужой домен.
-    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    # Страница ходит только на свой домен: во внешний мир ходит функция, браузер о провайдере ничего не знает.
+    Content-Security-Policy = "default-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"

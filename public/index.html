@@ -85,42 +85,10 @@
         </label>
         <label class="radio">
           <input type="radio" name="source" value="llm">
-          <span>LLM (мок)<small>новая цитата по твоим шаблонам, сети пока нет</small></span>
+          <span>LLM<small>новая цитата от модели, тема берётся из слота броска</small></span>
         </label>
       </fieldset>
-
-      <div class="field">
-        <label for="provider">Провайдер</label>
-        <select id="provider"></select>
-      </div>
-
-      <div class="field">
-        <label for="apiKey">API-ключ</label>
-        <input id="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-or-...">
-        <small>Хранится только в этом браузере (localStorage) и никуда не отправляется. Пока не используется.</small>
-      </div>
-
-      <div class="field">
-        <label for="model">Модель</label>
-        <input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="например, openai/gpt-4o-mini">
-      </div>
-
-      <div class="field">
-        <label for="examples">Примеры цитат (шаблоны)</label>
-        <textarea id="examples" rows="6" spellcheck="false" placeholder="Одна цитата на строку"></textarea>
-        <small id="examplesCount"></small>
-      </div>
-
-      <button type="button" id="testGen" class="btn">Проверить генерацию (мок)</button>
-      <div class="test-out" id="testOut" hidden>
-        <p class="test-text" id="testText"></p>
-        <details>
-          <summary>Что уйдёт в модель</summary>
-          <pre id="testPrompt"></pre>
-        </details>
-      </div>
-
-      <button type="button" id="resetSettings" class="btn btn-danger">Стереть ключ и настройки</button>
+      <p class="hint">LLM работает через сервер сайта, свой ключ вводить не нужно. Число запросов в минуту ограничено. Если лимит кончился или модель не ответила, покажется цитата из сборника.</p>
     </div>
   </dialog>
 

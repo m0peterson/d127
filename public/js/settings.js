@@ -1,12 +1,10 @@
 const SETTINGS_KEY = 'd127.settings.v1';
 const LAST_KEY = 'd127.last.v1';
 
+export const SOURCES = ['collection', 'llm'];
+
 export const DEFAULT_SETTINGS = {
   source: 'collection', // 'collection' | 'llm'
-  provider: 'mock', // ключ из PROVIDERS в llm.js
-  apiKey: '',
-  model: '',
-  examples: '', // шаблоны цитат для LLM, по одной на строку
 };
 
 function read(key) {
@@ -28,29 +26,22 @@ function write(key, value) {
 }
 
 export function loadSettings() {
-  return { ...DEFAULT_SETTINGS, ...(read(SETTINGS_KEY) ?? {}) };
+  const stored = read(SETTINGS_KEY);
+  return { source: SOURCES.includes(stored?.source) ? stored.source : DEFAULT_SETTINGS.source };
 }
 
+/** Возвращает false, если браузер не дал записать (переполнено хранилище, приватный режим). */
 export function saveSettings(patch) {
-  const next = { ...loadSettings(), ...patch };
-  write(SETTINGS_KEY, next);
-  return next;
+  return write(SETTINGS_KEY, { ...loadSettings(), ...patch });
 }
 
-export function resetSettings() {
-  try {
-    localStorage.removeItem(SETTINGS_KEY);
-  } catch {
-    /* хранилище недоступно, сбрасывать нечего */
-  }
-  return { ...DEFAULT_SETTINGS };
-}
-
-export function exampleList(settings) {
-  return settings.examples
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+/**
+ * Старые версии хранили здесь личные API-ключи, модели и примеры цитат. Ключ теперь лежит на сервере,
+ * поэтому всё лишнее стираем: лишний ключ в localStorage зря доступен любому скрипту на странице.
+ */
+export function purgeLegacySettings() {
+  const stored = read(SETTINGS_KEY);
+  if (stored && Object.keys(stored).some((key) => key !== 'source')) write(SETTINGS_KEY, loadSettings());
 }
 
 export const loadLast = () => read(LAST_KEY);

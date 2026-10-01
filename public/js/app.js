@@ -1,7 +1,7 @@
 import { rollBoth, randomInt, D127, D3 } from './dice.js';
 import { loadQuotes, pickQuote, SLOTS } from './quotes.js';
-import { loadSettings, saveSettings, resetSettings, exampleList, loadLast, saveLast } from './settings.js';
-import { PROVIDERS, generateQuote } from './llm.js';
+import { loadSettings, saveSettings, purgeLegacySettings, loadLast, saveLast } from './settings.js';
+import { generateQuote } from './llm.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -9,9 +9,6 @@ const els = {
   slot: $('slot'), card: $('card'), qdate: $('qdate'), qtext: $('qtext'), qsrc: $('qsrc'),
   roll: $('rollBtn'), share: $('shareBtn'), toast: $('toast'),
   dialog: $('settings'), openSettings: $('openSettings'), closeSettings: $('closeSettings'),
-  provider: $('provider'), apiKey: $('apiKey'), model: $('model'), examples: $('examples'),
-  examplesCount: $('examplesCount'), testGen: $('testGen'), testOut: $('testOut'),
-  testText: $('testText'), testPrompt: $('testPrompt'), resetSettings: $('resetSettings'),
 };
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -28,7 +25,9 @@ function toast(message) {
   els.toast.textContent = message;
   els.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2600);
+  // длинные сообщения об ошибках читаются дольше
+  const ms = Math.min(9000, Math.max(2600, message.length * 55));
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
 }
 
 async function ensureQuotes() {
@@ -43,12 +42,16 @@ function renderDice(d127, d3) {
   els.val3.textContent = d3;
 }
 
+function sourceLabel(result) {
+  return result.source?.startsWith('llm') ? 'сочинила LLM в духе Стэтхема' : 'по мотивам Стэтхема';
+}
+
 function renderResult(result, { animate = false } = {}) {
   renderDice(result.d127, result.d3);
   els.slot.textContent = `Слот ${result.slot} из ${SLOTS}`;
   els.qdate.textContent = `Цитата дня · ${dateFormat.format(result.ts)}`;
   els.qtext.textContent = result.text;
-  els.qsrc.textContent = result.source === 'collection' ? 'по мотивам Стэтхема' : 'мок LLM в духе Стэтхема';
+  els.qsrc.textContent = sourceLabel(result);
   els.card.classList.remove('empty');
   els.share.hidden = false;
   if (animate) {
@@ -78,14 +81,8 @@ async function resolveQuote({ d127, d3 }, settings) {
   const anchor = pickQuote(quotes, d127, d3);
   if (settings.source !== 'llm') return { text: anchor.text, source: 'collection', slot: anchor.slot };
   try {
-    const res = await generateQuote(settings.provider, {
-      d127, d3,
-      anchor: anchor.text,
-      examples: exampleList(settings),
-      apiKey: settings.apiKey,
-      model: settings.model,
-    });
-    return { text: res.text, source: `llm:${settings.provider}`, slot: anchor.slot };
+    const text = await generateQuote({ d127, d3 });
+    return { text, source: 'llm', slot: anchor.slot };
   } catch (err) {
     toast(`LLM не ответила, показан сборник: ${err.message}`);
     return { text: anchor.text, source: 'collection', slot: anchor.slot };
@@ -157,31 +154,16 @@ async function share() {
 
 /* настройки */
 
-function syncExamplesCount() {
-  els.examplesCount.textContent = `Примеров: ${exampleList({ examples: els.examples.value }).length}`;
-}
-
 function fillSettingsForm() {
-  const s = loadSettings();
-  for (const radio of document.querySelectorAll('input[name="source"]')) radio.checked = radio.value === s.source;
-  els.provider.value = s.provider;
-  els.apiKey.value = s.apiKey;
-  els.model.value = s.model;
-  els.examples.value = s.examples;
-  syncExamplesCount();
+  const { source } = loadSettings();
+  for (const radio of document.querySelectorAll('input[name="source"]')) radio.checked = radio.value === source;
 }
 
 function initSettings() {
-  for (const p of Object.values(PROVIDERS)) {
-    const option = new Option(p.label, p.id);
-    option.disabled = !p.ready;
-    els.provider.append(option);
-  }
   fillSettingsForm();
 
   els.openSettings.addEventListener('click', () => {
     fillSettingsForm();
-    els.testOut.hidden = true;
     els.dialog.showModal();
   });
   els.closeSettings.addEventListener('click', () => els.dialog.close());
@@ -190,48 +172,11 @@ function initSettings() {
   });
 
   for (const radio of document.querySelectorAll('input[name="source"]')) {
-    radio.addEventListener('change', () => saveSettings({ source: radio.value }));
-  }
-  els.provider.addEventListener('change', () => saveSettings({ provider: els.provider.value }));
-  els.apiKey.addEventListener('input', () => saveSettings({ apiKey: els.apiKey.value.trim() }));
-  els.model.addEventListener('input', () => saveSettings({ model: els.model.value.trim() }));
-  els.examples.addEventListener('input', () => {
-    saveSettings({ examples: els.examples.value });
-    syncExamplesCount();
-  });
-
-  els.testGen.addEventListener('click', testGeneration);
-  els.resetSettings.addEventListener('click', () => {
-    if (!confirm('Стереть API-ключ, модель и примеры цитат из этого браузера?')) return;
-    resetSettings();
-    fillSettingsForm();
-    els.testOut.hidden = true;
-    toast('Настройки стёрты');
-  });
-}
-
-async function testGeneration() {
-  const settings = loadSettings();
-  const { d127, d3 } = current ?? rollBoth();
-  els.testGen.disabled = true;
-  els.testOut.hidden = false;
-  els.testText.textContent = 'Генерирую...';
-  els.testPrompt.textContent = '';
-  try {
-    await ensureQuotes().catch(() => {}); // якорь необязателен
-    const anchor = quotes.length ? pickQuote(quotes, d127, d3).text : undefined;
-    const res = await generateQuote(settings.provider, {
-      d127, d3, anchor,
-      examples: exampleList(settings),
-      apiKey: settings.apiKey,
-      model: settings.model,
+    radio.addEventListener('change', () => {
+      if (!saveSettings({ source: radio.value })) {
+        toast('Браузер не дал сохранить настройки: кончилось место или включён приватный режим');
+      }
     });
-    els.testText.textContent = res.text;
-    els.testPrompt.textContent = JSON.stringify(res.meta.messages, null, 2);
-  } catch (err) {
-    els.testText.textContent = `Ошибка: ${err.message}`;
-  } finally {
-    els.testGen.disabled = false;
   }
 }
 
@@ -253,6 +198,7 @@ function registerServiceWorker() {
 
 els.roll.addEventListener('click', roll);
 els.share.addEventListener('click', share);
+purgeLegacySettings();
 initSettings();
 restoreLast();
 registerServiceWorker();
