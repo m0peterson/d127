@@ -1,22 +1,23 @@
 /**
- * POST /api/quote  { "d127": 1..127, "d3": 1..3 }  ->  { "text": "..." }
+ * POST /api/quote  { "d127": 1..127, "d3": 1..3, "examples"?: ["...", ...] }  ->  { "text": "..." }
  *
  * Единственное место, где живёт LLM-ключ. Настройки берутся из переменных окружения Netlify:
  *   LLM_PROVIDER  openrouter | opencodego | mock   (по умолчанию openrouter)
  *   LLM_API_KEY   ключ провайдера
  *   LLM_MODEL     id модели
  *
- * Браузер присылает только два числа. Промпт, примеры, модель и лимит токенов задаёт сервер,
- * поэтому эту функцию нельзя использовать как бесплатный универсальный чат.
+ * Браузер присылает два числа и, по желанию, свой список цитат-примеров (до MAX_EXAMPLES строк по MAX_EXAMPLE_CHARS
+ * символов, всё лишнее отсекается). Промпт, модель и лимит токенов задаёт сервер: список попадает в промпт только
+ * как примеры стиля, а ответ ограничен MAX_TOKENS, поэтому универсальным чатом функция не становится.
  * Частоту запросов ограничивает Netlify (rateLimit ниже), потолок расходов задаётся у провайдера.
  */
 
 import { D127, D3 } from '../../public/js/dice.js';
-import { pickQuote } from '../../public/js/quotes.js';
+import { normalizeExamples, pickQuote } from '../../public/js/quotes.js';
 import { loadCollection } from '../lib/collection.mjs';
 import { LlmError, PROVIDER_IDS, generateQuote } from '../lib/llm.mjs';
 
-const MAX_BODY_BYTES = 1024;
+const MAX_BODY_BYTES = 256 * 1024; // запас под MAX_EXAMPLES строк по MAX_EXAMPLE_CHARS символов в UTF-8
 
 function reply(status, body, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -43,10 +44,14 @@ export default async (req) => {
   } catch {
     return reply(400, { error: 'Тело запроса не похоже на JSON' });
   }
-  const { d127, d3 } = body ?? {};
+  const { d127, d3, examples: rawExamples } = body ?? {};
   if (!isDie(d127, D127) || !isDie(d3, D3)) {
     return reply(400, { error: `Нужны целые d127 от 1 до ${D127} и d3 от 1 до ${D3}` });
   }
+  if (rawExamples !== undefined && !(Array.isArray(rawExamples) && rawExamples.every((line) => typeof line === 'string'))) {
+    return reply(400, { error: 'examples должен быть списком строк' });
+  }
+  const ownExamples = normalizeExamples(rawExamples ?? []);
 
   const provider = (Netlify.env.get('LLM_PROVIDER') || 'openrouter').trim().toLowerCase();
   const apiKey = (Netlify.env.get('LLM_API_KEY') || '').trim();
@@ -76,8 +81,11 @@ export default async (req) => {
   }
 
   const anchor = pickQuote(quotes, d127, d3);
-  // саму цитату-тему в примеры не кладём: модель увидела бы её дважды
-  const examples = quotes.filter((_, i) => i !== anchor.index - 1);
+  // Свой список заменяет сборник в роли примеров, тема всё равно берётся из слота броска.
+  // Саму цитату-тему в примеры не кладём: модель увидела бы её дважды
+  const examples = ownExamples.length
+    ? ownExamples.filter((line) => line !== anchor.text)
+    : quotes.filter((_, i) => i !== anchor.index - 1);
 
   try {
     const text = await generateQuote({ provider, apiKey, model, anchor: anchor.text, examples });

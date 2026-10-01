@@ -1,8 +1,8 @@
 /**
  * Клиент LLM-генерации. Сама генерация идёт на сервере: netlify/functions/quote.mjs.
- * Ключа, модели и промпта в браузере нет, отправляются только числа броска.
+ * Ключа, модели и промпта в браузере нет, отправляются числа броска и, если задан, список своих цитат-примеров.
  *
- *   generateQuote({ d127, d3 }) -> Promise<string>
+ *   generateQuote({ d127, d3, examples? }) -> Promise<string>
  */
 
 const ENDPOINT = '/api/quote';
@@ -25,14 +25,14 @@ const STATUS_HINTS = {
   503: 'сервер сейчас недоступен',
 };
 
-export async function generateQuote({ d127, d3 }) {
+export async function generateQuote({ d127, d3, examples = [] }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ d127, d3 }),
+      body: JSON.stringify(examples.length ? { d127, d3, examples } : { d127, d3 }),
       signal: controller.signal,
     });
     // при ошибках ответ может быть не нашим JSON (страница Netlify про лимит, HTML 404), поэтому парсим осторожно

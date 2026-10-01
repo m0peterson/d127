@@ -88,6 +88,12 @@
           <span>LLM<small>новая цитата от модели, тема берётся из слота броска</small></span>
         </label>
       </fieldset>
+      <fieldset class="field">
+        <legend>Свои примеры для LLM</legend>
+        <textarea id="examples" rows="8" spellcheck="false" placeholder="Одна цитата на строку" aria-describedby="examplesCount"></textarea>
+        <small id="examplesCount"></small>
+        <small>Хранятся только в этом браузере. Если поле пустое, модель берёт примеры из сборника. Тема остаётся из слота броска.</small>
+      </fieldset>
       <p class="hint">LLM работает через сервер сайта, свой ключ вводить не нужно. Число запросов в минуту ограничено. Если лимит кончился или модель не ответила, покажется цитата из сборника.</p>
     </div>
   </dialog>

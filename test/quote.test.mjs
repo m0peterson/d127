@@ -85,7 +85,7 @@ test('валидация: методы, тип, размер и диапазон
   assert.equal((await call({ d127: 1, d3: 1 }, { headers: { 'Content-Type': 'text/plain' } })).status, 415);
   assert.equal((await call('не json')).status, 400);
   assert.equal((await call('null')).status, 400);
-  assert.equal((await call({ d127: 1, d3: 1, junk: 'x'.repeat(2000) })).status, 413);
+  assert.equal((await call({ d127: 1, d3: 1, junk: 'x'.repeat(300_000) })).status, 413);
   for (const bad of [
     { d127: 0, d3: 1 }, { d127: 128, d3: 1 }, { d127: 1, d3: 4 }, { d127: 1, d3: 0 },
     { d127: 1.5, d3: 1 }, { d127: '5', d3: 1 }, { d127: 1 }, {},
@@ -116,6 +116,48 @@ test('без настройки: клиент получает код причи
   assert.match(logged, /LLM_API_KEY/);
   assert.match(logged, /LLM_MODEL/);
   assert.match(logged, /новым деплоям/); // подсказка, что после правки переменных нужен деплой
+});
+
+test('свой список примеров заменяет сборник, тема остаётся из слота и не дублируется', async () => {
+  const anchor = pickQuote(QUOTES, 5, 2).text;
+  const own = ['Своя цитата номер один', '  2. Своя цитата номер два  ', anchor, 'Своя цитата номер один', '', '# комментарий'];
+  const res = await call({ d127: 5, d3: 2, examples: own });
+  assert.equal(res.status, 200);
+
+  const user = upstream[0].body.messages[1].content;
+  const shots = user.split('\n').filter((line) => /^\d+\. /.test(line));
+  assert.deepEqual(shots.map((line) => line.replace(/^\d+\. /, '')).sort(), ['Своя цитата номер два', 'Своя цитата номер один']);
+  assert.ok(user.includes(`«${anchor}»`), 'тема должна остаться из слота броска');
+  assert.ok(!shots.some((line) => line.endsWith(anchor)), 'тема попала в примеры');
+});
+
+test('пустой или отсутствующий список примеров: работают примеры из сборника', async () => {
+  for (const body of [{ d127: 5, d3: 2 }, { d127: 5, d3: 2, examples: [] }, { d127: 5, d3: 2, examples: ['', '  ', '# x'] }]) {
+    upstream = [];
+    assert.equal((await call(body)).status, 200);
+    const shots = upstream[0].body.messages[1].content.split('\n').filter((line) => /^\d+\. /.test(line));
+    assert.equal(shots.length, 30, JSON.stringify(body));
+  }
+});
+
+test('свои примеры: лишнее обрезается, плохой формат отбивается до провайдера', async () => {
+  const many = Array.from({ length: 400 }, (_, i) => `цитата ${i} ${'я'.repeat(400)}`);
+  assert.equal((await call({ d127: 1, d3: 1, examples: many })).status, 200);
+  const shots = upstream[0].body.messages[1].content.split('\n').filter((line) => /^\d+\. /.test(line));
+  assert.equal(shots.length, 30);
+  assert.ok(shots.every((line) => line.length <= 300 + 6), 'строки не обрезаны');
+
+  // самый большой честный запрос от браузера: предел по числу строк и по длине, кириллица (2 байта на символ)
+  const maxLegit = Array.from({ length: 300 }, (_, i) => `${i} `.padEnd(300, 'ж'));
+  const bytes = new TextEncoder().encode(JSON.stringify({ d127: 1, d3: 1, examples: maxLegit })).length;
+  assert.ok(bytes < 256 * 1024, `честный запрос ${bytes} байт не влезает в лимит`);
+  assert.equal((await call({ d127: 1, d3: 1, examples: maxLegit })).status, 200);
+
+  upstream = [];
+  for (const bad of ['строка', { a: 1 }, [1, 2], ['ок', null], 7]) {
+    assert.equal((await call({ d127: 1, d3: 1, examples: bad })).status, 400, JSON.stringify(bad));
+  }
+  assert.equal(upstream.length, 0);
 });
 
 test('ошибка провайдера: посетителю нейтральный 502, ключ не утекает и в логи', async () => {
