@@ -1,5 +1,5 @@
 import { rollBoth, randomInt, D127, D3 } from './dice.js';
-import { loadQuotes, pickQuote, SLOTS } from './quotes.js';
+import { loadQuotes, pickQuote, parseExamples, MAX_EXAMPLES, SLOTS } from './quotes.js';
 import { loadSettings, saveSettings, purgeLegacySettings, loadLast, saveLast } from './settings.js';
 import { generateQuote } from './llm.js';
 
@@ -9,6 +9,7 @@ const els = {
   slot: $('slot'), card: $('card'), qdate: $('qdate'), qtext: $('qtext'), qsrc: $('qsrc'),
   roll: $('rollBtn'), share: $('shareBtn'), toast: $('toast'),
   dialog: $('settings'), openSettings: $('openSettings'), closeSettings: $('closeSettings'),
+  examples: $('examples'), examplesCount: $('examplesCount'),
 };
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -81,7 +82,7 @@ async function resolveQuote({ d127, d3 }, settings) {
   const anchor = pickQuote(quotes, d127, d3);
   if (settings.source !== 'llm') return { text: anchor.text, source: 'collection', slot: anchor.slot };
   try {
-    const text = await generateQuote({ d127, d3 });
+    const text = await generateQuote({ d127, d3, examples: parseExamples(settings.examples) });
     return { text, source: 'llm', slot: anchor.slot };
   } catch (err) {
     toast(`LLM не ответила, показан сборник: ${err.message}`);
@@ -154,9 +155,18 @@ async function share() {
 
 /* настройки */
 
+function showExamplesCount() {
+  const count = parseExamples(els.examples.value).length;
+  els.examplesCount.textContent = count
+    ? `Уйдёт в модель: ${count} из максимум ${MAX_EXAMPLES}. Для каждого запроса берётся 30 случайных.`
+    : 'Пока пусто, поэтому примеры берутся из сборника.';
+}
+
 function fillSettingsForm() {
-  const { source } = loadSettings();
+  const { source, examples } = loadSettings();
   for (const radio of document.querySelectorAll('input[name="source"]')) radio.checked = radio.value === source;
+  els.examples.value = examples;
+  showExamplesCount();
 }
 
 function initSettings() {
@@ -169,6 +179,13 @@ function initSettings() {
   els.closeSettings.addEventListener('click', () => els.dialog.close());
   els.dialog.addEventListener('click', (e) => {
     if (e.target === els.dialog) els.dialog.close(); // тап по затемнению
+  });
+
+  els.examples.addEventListener('input', () => {
+    showExamplesCount();
+    if (!saveSettings({ examples: els.examples.value })) {
+      toast('Браузер не дал сохранить настройки: кончилось место или включён приватный режим');
+    }
   });
 
   for (const radio of document.querySelectorAll('input[name="source"]')) {
