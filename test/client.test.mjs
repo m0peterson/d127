@@ -46,6 +46,32 @@ test('свои примеры уходят на сервер только ког
   assert.deepEqual(JSON.parse(sent.init.body), { d127: 1, d3: 1 });
 });
 
+test('выбранная модель и личный ключ передаются в теле запроса вместе с примерами', async () => {
+  serverAnswers(200, { text: 'ок' });
+  await generateQuote({
+    d127: 2, d3: 3, model: 'xiaomi/mimo-v2.6-pro', apiKey: '  sk-personal-key\n', examples: ['пример'],
+  });
+  assert.deepEqual(JSON.parse(sent.init.body), {
+    d127: 2, d3: 3, model: 'xiaomi/mimo-v2.6-pro', apiKey: 'sk-personal-key', examples: ['пример'],
+  });
+  assert.deepEqual(sent.init.headers, { 'Content-Type': 'application/json' });
+});
+
+test('пустой или некорректный личный ключ не отправляется: сервер может использовать ключ сайта', async () => {
+  serverAnswers(200, { text: 'ок' });
+  for (const apiKey of ['', '  \n', null, 42, { key: 'sk-key' }]) {
+    await generateQuote({ d127: 1, d3: 1, model: 'meta/muse-spark-1.3-contributor', apiKey });
+    assert.deepEqual(JSON.parse(sent.init.body), { d127: 1, d3: 1, model: 'meta/muse-spark-1.3-contributor' });
+  }
+});
+
+test('ошибки выбора модели и личного ключа объясняются в настройках', async () => {
+  serverAnswers(400, { code: 'invalid_model' });
+  assert.equal(await reasonShown(), 'выбери модель из списка в настройках');
+  serverAnswers(400, { code: 'invalid_key' });
+  assert.equal(await reasonShown(), 'проверь личный ключ OpenRouter в настройках');
+});
+
 test('503 «не настроена» и 503 «сборник недоступен» различаются', async () => {
   serverAnswers(503, { error: 'Генерация не настроена на сервере', code: 'not_configured' });
   assert.equal(await reasonShown(), 'генерация не настроена на сервере');

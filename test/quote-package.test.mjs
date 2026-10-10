@@ -17,7 +17,9 @@ const CODE = [
   'netlify/functions/quote.mjs',
   'netlify/lib/llm.mjs',
   'netlify/lib/collection.mjs',
+  'netlify/lib/model-catalog.mjs',
   'public/js/dice.js',
+  'public/js/models.js',
   'public/js/quotes.js',
 ];
 const QUOTES = parseQuotes(readFileSync(path.join(ROOT, COLLECTION_FILE), 'utf8'));

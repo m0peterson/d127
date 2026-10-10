@@ -1,6 +1,6 @@
 // Оффлайн-кэш. Стратегия stale-while-revalidate: отдаём из кэша сразу и обновляем в фоне,
 // поэтому правки в quotes.txt доезжают до пользователей без ручного повышения версии.
-const CACHE = 'd127-v4';
+const CACHE = 'd127-v5';
 const SHELL = [
   './',
   'index.html',
@@ -10,6 +10,7 @@ const SHELL = [
   'js/quotes.js',
   'js/settings.js',
   'js/llm.js',
+  'js/models.js',
   'data/quotes.txt',
   'manifest.webmanifest',
   'icons/icon.svg',

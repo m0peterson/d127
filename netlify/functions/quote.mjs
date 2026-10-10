@@ -1,18 +1,19 @@
 /**
- * POST /api/quote  { "d127": 1..127, "d3": 1..3, "examples"?: ["...", ...] }  ->  { "text": "..." }
+ * POST /api/quote { d127, d3, model?, apiKey?, examples? } -> { text }
  *
- * Единственное место, где живёт LLM-ключ. Настройки берутся из переменных окружения Netlify:
+ * Ключ сайта хранится в переменных Netlify. Личный ключ может прийти в теле запроса:
  *   LLM_PROVIDER  openrouter | opencodego | mock   (по умолчанию openrouter)
  *   LLM_API_KEY   ключ провайдера
- *   LLM_MODEL     id модели
+ *   LLM_MODEL     id модели только для устаревшего режима OpenCode Go
  *
- * Браузер присылает два числа и, по желанию, свой список цитат-примеров (до MAX_EXAMPLES строк по MAX_EXAMPLE_CHARS
- * символов, всё лишнее отсекается). Промпт, модель и лимит токенов задаёт сервер: список попадает в промпт только
+ * Браузер выбирает модель из общего списка и может прислать личный ключ и свои примеры (до MAX_EXAMPLES строк
+ * по MAX_EXAMPLE_CHARS символов, всё лишнее отсекается). Промпт и лимит токенов задаёт сервер: список попадает в промпт только
  * как примеры стиля, а ответ ограничен MAX_TOKENS, поэтому универсальным чатом функция не становится.
  * Частоту запросов ограничивает Netlify (rateLimit ниже), потолок расходов задаётся у провайдера.
  */
 
 import { D127, D3 } from '../../public/js/dice.js';
+import { DEFAULT_MODEL, getModelChain } from '../../public/js/models.js';
 import { normalizeExamples, pickQuote } from '../../public/js/quotes.js';
 import { loadCollection } from '../lib/collection.mjs';
 import { LlmError, PROVIDER_IDS, generateQuote } from '../lib/llm.mjs';
@@ -44,24 +45,36 @@ export default async (req) => {
   } catch {
     return reply(400, { error: 'Тело запроса не похоже на JSON' });
   }
-  const { d127, d3, examples: rawExamples } = body ?? {};
+  const { d127, d3, examples: rawExamples, model: rawModel, apiKey: rawApiKey } = body ?? {};
   if (!isDie(d127, D127) || !isDie(d3, D3)) {
     return reply(400, { error: `Нужны целые d127 от 1 до ${D127} и d3 от 1 до ${D3}` });
   }
   if (rawExamples !== undefined && !(Array.isArray(rawExamples) && rawExamples.every((line) => typeof line === 'string'))) {
     return reply(400, { error: 'examples должен быть списком строк' });
   }
+  const model = rawModel === undefined ? DEFAULT_MODEL : rawModel;
+  if (typeof model !== 'string' || !getModelChain(model).length) {
+    return reply(400, { error: 'Выбери модель из списка в настройках', code: 'invalid_model' });
+  }
+  if (rawApiKey !== undefined && (typeof rawApiKey !== 'string' || rawApiKey.length > 2048
+    || (rawApiKey.trim() && !/^[\x21-\x7e]+$/.test(rawApiKey.trim())))) {
+    return reply(400, { error: 'Проверь формат ключа OpenRouter', code: 'invalid_key' });
+  }
+  const ownKey = rawApiKey?.trim() || '';
   const ownExamples = normalizeExamples(rawExamples ?? []);
 
-  const provider = (Netlify.env.get('LLM_PROVIDER') || 'openrouter').trim().toLowerCase();
-  const apiKey = (Netlify.env.get('LLM_API_KEY') || '').trim();
-  const model = (Netlify.env.get('LLM_MODEL') || '').trim();
+  const configuredProvider = (Netlify.env.get('LLM_PROVIDER') || 'openrouter').trim().toLowerCase();
+  // Новый интерфейс всегда выбирает OpenRouter. Mock сохраняется для разработки без трат.
+  const provider = ownKey || (rawModel !== undefined && configuredProvider !== 'mock') ? 'openrouter' : configuredProvider;
+  const siteKey = (Netlify.env.get('LLM_API_KEY') || '').trim();
+  const apiKey = ownKey || siteKey;
+  const legacyModel = provider === 'opencodego' ? (Netlify.env.get('LLM_MODEL') || '').trim() : '';
   const problems = [];
   if (!PROVIDER_IDS.includes(provider)) {
     problems.push(`LLM_PROVIDER=«${provider}» неизвестен, допустимы ${PROVIDER_IDS.join(', ')}`);
   } else if (provider !== 'mock') {
     if (!apiKey) problems.push('не задана переменная LLM_API_KEY');
-    if (!model) problems.push('не задана переменная LLM_MODEL');
+    if (provider === 'opencodego' && !legacyModel) problems.push('не задана переменная LLM_MODEL');
   }
   if (problems.length) {
     // Посетителю причина не нужна, а владельцу нужна вся сразу: каждая правка переменной требует нового деплоя
@@ -88,12 +101,14 @@ export default async (req) => {
     : quotes.filter((_, i) => i !== anchor.index - 1);
 
   try {
-    const text = await generateQuote({ provider, apiKey, model, anchor: anchor.text, examples });
+    const text = await generateQuote({ provider, apiKey, model: provider === 'opencodego' ? legacyModel : model,
+      anchor: anchor.text, examples, sensitiveValues: [apiKey, siteKey] });
     return reply(200, { text });
   } catch (err) {
     // подробности только в логах Netlify (Logs -> Functions), посетителю уходит нейтральный текст
     const message = String(err.message);
-    const detail = apiKey ? message.replaceAll(apiKey, '***') : message;
+    const detail = [...new Set([apiKey, siteKey].filter(Boolean))]
+      .sort((a, b) => b.length - a.length).reduce((text, key) => text.replaceAll(key, '***'), message);
     console.error(`LLM (${provider}) не ответила${err instanceof LlmError && err.status ? `, HTTP ${err.status}` : ''}: ${detail}`);
     return reply(502, { error: 'Модель не ответила', code: 'model_failed' });
   }
