@@ -89,12 +89,26 @@
         </label>
       </fieldset>
       <fieldset class="field">
+        <legend>Модель OpenRouter</legend>
+        <label class="sr-only" for="model">Модель для генерации цитаты</label>
+        <select id="model" aria-describedby="modelFallbacks modelReasoning"></select>
+        <small id="modelFallbacks" aria-live="polite"></small>
+        <small id="modelReasoning">Режим рассуждений: high для Muse и MiMo, xhigh для Haiku, если модель его поддерживает.</small>
+      </fieldset>
+      <fieldset class="field">
+        <legend>Свой ключ OpenRouter</legend>
+        <label class="sr-only" for="apiKey">Личный API-ключ OpenRouter</label>
+        <input id="apiKey" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="2048" placeholder="Пусто — используется ключ сайта" aria-describedby="apiKeyHint">
+        <button type="button" id="clearApiKey" class="text-btn key-clear" disabled>Очистить ключ</button>
+        <small id="apiKeyHint">Ключ хранится на этом устройстве в браузере и отправляется только серверу сайта и OpenRouter для генерации. Пустое поле или очистка возвращают ключ сайта из настроек Netlify.</small>
+      </fieldset>
+      <fieldset class="field">
         <legend>Свои примеры для LLM</legend>
         <textarea id="examples" rows="8" spellcheck="false" placeholder="Одна цитата на строку" aria-describedby="examplesCount"></textarea>
         <small id="examplesCount"></small>
         <small>Хранятся только в этом браузере. Если поле пустое, модель берёт примеры из сборника. Тема остаётся из слота броска.</small>
       </fieldset>
-      <p class="hint">LLM работает через сервер сайта, свой ключ вводить не нужно. Число запросов в минуту ограничено. Если лимит кончился или модель не ответила, покажется цитата из сборника.</p>
+      <p class="hint">LLM работает через сервер сайта. Число запросов в минуту ограничено. Если модели не ответили или лимит кончился, покажется цитата из сборника.</p>
     </div>
   </dialog>
 

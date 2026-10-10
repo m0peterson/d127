@@ -1,5 +1,5 @@
 /**
- * Генерация цитат через LLM. Работает только на сервере (Netlify Function), ключ в браузер не попадает.
+ * Генерация цитат через LLM. Серверный ключ остаётся на сервере; личный может прийти из браузера.
  *
  *   generateQuote({ provider, apiKey, model, anchor, examples }) -> Promise<string>
  *
@@ -8,6 +8,8 @@
  */
 
 import { randomInt } from '../../public/js/dice.js';
+import { getModelChain } from '../../public/js/models.js';
+import { getReasoningConfig, loadModelCatalog } from './model-catalog.mjs';
 
 export const SYSTEM_PROMPT = [
   'Ты сочиняешь мемные «цитаты Джейсона Стэтхэма»: пафосные фразы, которые звучат как глубокая мужская мудрость,',
@@ -22,8 +24,11 @@ export const SYSTEM_PROMPT = [
 /** Сколько примеров уходит в один запрос. Держит размер промпта, а с ним и счёт, постоянным. */
 export const EXAMPLES_PER_REQUEST = 30;
 const EXAMPLE_MAX_CHARS = 300;
-const MAX_TOKENS = 1500; // запас на думающие модели: рассуждения съедают часть лимита. Меньше значение, меньше потолок расходов
+const MAX_TOKENS = 8192; // общий предел ответа и рассуждений: нужен запас для high/xhigh
 const UPSTREAM_TIMEOUT_MS = 25_000;
+
+const redact = (message, keys) => [...new Set(keys.filter(Boolean))]
+  .sort((a, b) => b.length - a.length).reduce((text, key) => text.replaceAll(key, '***'), message);
 
 /** Случайные `limit` примеров без повторов (частичный Фишер-Йейтс). `rand(n)` даёт число от 1 до n. */
 export function sampleExamples(examples, limit = EXAMPLES_PER_REQUEST, rand = randomInt) {
@@ -59,7 +64,7 @@ export function buildMessages({ anchor, examples, rand }) {
   ];
 }
 
-/** Приводит то, что вписано в переменную LLM_MODEL, к id, который понимает API. */
+/** Приводит ссылку или id к виду, который понимает API провайдера. */
 export function normalizeModel(providerId, raw) {
   const value = String(raw ?? '').trim();
   if (providerId === 'openrouter') {
@@ -106,21 +111,22 @@ export class LlmError extends Error {
   }
 }
 
-async function chatCompletion({ url, apiKey, body }) {
+async function chatCompletion({ url, apiKey, body, timeoutMs = UPSTREAM_TIMEOUT_MS, sensitiveValues = [apiKey] }) {
   let res;
+  let raw;
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
+    raw = await res.text();
   } catch (err) {
-    if (err?.name === 'TimeoutError') throw new LlmError(`нет ответа за ${UPSTREAM_TIMEOUT_MS / 1000} секунд`);
-    throw new LlmError(`запрос не дошёл до сервера: ${err?.message ?? err}`);
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') throw new LlmError('модель не ответила в отведённое время');
+    throw new LlmError(`запрос не дошёл до сервера: ${redact(String(err?.message ?? err), sensitiveValues)}`);
   }
 
-  const raw = await res.text();
   let data = null;
   try {
     data = JSON.parse(raw);
@@ -128,14 +134,15 @@ async function chatCompletion({ url, apiKey, body }) {
     /* не JSON: ниже покажем кусок текста */
   }
   const apiMessage = data?.error?.message ?? data?.error ?? data?.message;
-  const detail = typeof apiMessage === 'string' ? apiMessage : raw;
+  // Скрываем ключи ДО обрезания: иначе на границе slice в лог попадёт часть ключа.
+  const detail = redact(typeof apiMessage === 'string' ? apiMessage : raw, sensitiveValues);
   if (!res.ok) throw new LlmError(`HTTP ${res.status}: ${detail.slice(0, 200)}`, res.status);
-  if (data?.error) throw new LlmError(`провайдер вернул ошибку: ${detail.slice(0, 200)}`);
-  if (!data) throw new LlmError(`ответ не похож на JSON: ${raw.slice(0, 120)}`);
+  if (data?.error) throw new LlmError(`провайдер вернул ошибку: ${detail.slice(0, 200)}`, Number(data.error.code) || undefined);
+  if (!data) throw new LlmError(`ответ не похож на JSON: ${redact(raw, sensitiveValues).slice(0, 120)}`);
 
   const text = cleanQuote(extractContent(data));
   if (!text) {
-    throw new LlmError('пустой ответ модели. Думающая модель могла потратить весь лимит токенов на рассуждения, возьми модель без них');
+    throw new LlmError('пустой ответ модели, включая возможное исчерпание лимита токенов на рассуждения');
   }
   return text;
 }
@@ -153,14 +160,53 @@ function mockQuote({ anchor, examples }) {
   return pool.length ? pool[randomInt(pool.length) - 1] : 'Мок работает, но примеров нет.';
 }
 
-export async function generateQuote({ provider, apiKey, model, anchor, examples, rand }) {
+export async function generateQuote({ provider, apiKey, model, anchor, examples, rand, sensitiveValues = [apiKey] }) {
   if (provider === 'mock') return mockQuote({ anchor, examples });
   const url = CHAT_URLS[provider];
   if (!url) throw new LlmError(`неизвестный LLM_PROVIDER: «${provider}», допустимы ${PROVIDER_IDS.join(', ')}`);
   const messages = buildMessages({ anchor, examples, rand });
-  return chatCompletion({
-    url,
-    apiKey,
-    body: { model: normalizeModel(provider, model), messages, max_tokens: MAX_TOKENS },
-  });
+  if (provider !== 'openrouter') {
+    return chatCompletion({ url, apiKey, sensitiveValues, body: { model: normalizeModel(provider, model), messages, max_tokens: MAX_TOKENS } });
+  }
+
+  const chain = getModelChain(model);
+  if (!chain.length) throw new LlmError('неизвестная модель OpenRouter');
+  const deadline = Date.now() + UPSTREAM_TIMEOUT_MS;
+  const catalog = await loadModelCatalog();
+  let lastError;
+  for (const [index, option] of chain.entries()) {
+    // Повтор без неподдерживаемого reasoning делит бюджет с первой попыткой этой же модели.
+    // Делим оставшееся время между оставшимися моделями. Один Haiku получает весь бюджет.
+    const startedAt = Date.now();
+    const modelDeadline = startedAt + Math.max(0, Math.floor((deadline - startedAt) / (chain.length - index)));
+    let reasoning = getReasoningConfig(catalog.get(option.id), option.reasoning);
+    while (Date.now() < modelDeadline) {
+      const timeoutMs = modelDeadline - Date.now();
+      if (timeoutMs <= 0) break;
+      try {
+        return await chatCompletion({
+          url, apiKey, timeoutMs, sensitiveValues,
+          body: {
+            model: option.id, messages, max_tokens: MAX_TOKENS,
+            ...(reasoning && { reasoning }),
+          },
+        });
+      } catch (err) {
+        lastError = err;
+        // Неверный ключ/нет кредита не исправить сменой модели. Личный ключ не заменяем серверным.
+        if ([401, 402].includes(err.status)) throw err;
+        const unsupportedReasoning = reasoning && [400, 422].includes(err.status)
+          && /reasoning|thinking|effort/i.test(err.message)
+          && /not support|unsupported|not allowed|invalid|must be|only|unknown|unrecognized/i.test(err.message);
+        if (unsupportedReasoning) {
+          // Каталог может быть недоступен или устареть: пробуем допустимый high, затем без reasoning.
+          reasoning = reasoning.effort === 'xhigh' ? { effort: 'high', exclude: true } : undefined;
+          continue;
+        }
+        break;
+      }
+    }
+    if (Date.now() >= deadline) break;
+  }
+  throw lastError ?? new LlmError('нет времени для запроса к резервным моделям');
 }

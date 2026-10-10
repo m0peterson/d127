@@ -1,8 +1,9 @@
 /**
  * Клиент LLM-генерации. Сама генерация идёт на сервере: netlify/functions/quote.mjs.
- * Ключа, модели и промпта в браузере нет, отправляются числа броска и, если задан, список своих цитат-примеров.
+ * Отправляются числа броска, выбранная модель и, если заданы, свои цитаты-примеры и личный ключ OpenRouter.
+ * Если личный ключ пуст, сервер использует ключ сайта. Серверный ключ и промпт в браузер не передаются.
  *
- *   generateQuote({ d127, d3, examples? }) -> Promise<string>
+ *   generateQuote({ d127, d3, examples?, model?, apiKey? }) -> Promise<string>
  */
 
 const ENDPOINT = '/api/quote';
@@ -13,6 +14,8 @@ const CODE_HINTS = new Map([
   ['not_configured', 'генерация не настроена на сервере'],
   ['collection_unavailable', 'сервер не смог загрузить сборник цитат'],
   ['model_failed', 'модель не ответила'],
+  ['invalid_model', 'выбери модель из списка в настройках'],
+  ['invalid_key', 'проверь личный ключ OpenRouter в настройках'],
 ]);
 
 // Запасной вариант, когда кода нет, то есть ответила не наша функция, а платформа (страница Netlify про лимит, HTML 404)
@@ -25,14 +28,19 @@ const STATUS_HINTS = {
   503: 'сервер сейчас недоступен',
 };
 
-export async function generateQuote({ d127, d3, examples = [] }) {
+export async function generateQuote({ d127, d3, examples = [], model, apiKey = '' }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
+    const body = { d127, d3 };
+    if (examples.length) body.examples = examples;
+    if (model !== undefined) body.model = model;
+    const key = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (key) body.apiKey = key;
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(examples.length ? { d127, d3, examples } : { d127, d3 }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     // при ошибках ответ может быть не нашим JSON (страница Netlify про лимит, HTML 404), поэтому парсим осторожно

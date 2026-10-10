@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import handler, { config } from '../netlify/functions/quote.mjs';
 import { cleanQuote, normalizeModel, sampleExamples } from '../netlify/lib/llm.mjs';
 import { parseQuotes, pickQuote } from '../public/js/quotes.js';
+import { DEFAULT_MODEL, MODEL_OPTIONS } from '../public/js/models.js';
 
 const COLLECTION = readFileSync(new URL('../public/data/quotes.txt', import.meta.url), 'utf8');
 const QUOTES = parseQuotes(COLLECTION);
@@ -23,6 +24,11 @@ beforeEach(() => {
   realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const href = String(url);
+    if (href === 'https://openrouter.ai/api/v1/models') {
+      return Response.json({ data: MODEL_OPTIONS.map(({ id }) => ({
+        id, supported_parameters: ['reasoning'], reasoning: { supported_efforts: ['xhigh', 'high', 'medium', 'low'] },
+      })) });
+    }
     if (href === 'https://site.test/data/quotes.txt') return new Response(COLLECTION);
     upstream.push({ url: href, headers: init.headers, body: JSON.parse(init.body) });
     return upstreamReply();
@@ -54,8 +60,9 @@ test('счастливый путь: отдаёт очищенный текст 
   const [req] = upstream;
   assert.equal(req.url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(req.headers.Authorization, `Bearer ${SECRET}`);
-  assert.equal(req.body.model, 'vendor/some-model'); // ссылка из переменной привели к id
-  assert.deepEqual(Object.keys(req.body).sort(), ['max_tokens', 'messages', 'model']);
+  assert.equal(req.body.model, DEFAULT_MODEL); // выбор больше не зависит от LLM_MODEL
+  assert.deepEqual(req.body.reasoning, { effort: 'high', exclude: true });
+  assert.deepEqual(Object.keys(req.body).sort(), ['max_tokens', 'messages', 'model', 'reasoning']);
 });
 
 test('тема берётся из слота броска и не дублируется в примерах', async () => {
@@ -68,15 +75,18 @@ test('тема берётся из слота броска и не дублир�
   assert.ok(!shots.some((line) => line.endsWith(anchor)), 'якорь попал в примеры');
 });
 
-test('клиент не может подменить модель, промпт или ключ: лишние поля игнорируются', async () => {
+test('клиент выбирает разрешённую модель, но не подменяет промпт, endpoint или лимит токенов', async () => {
   const res = await call({
-    d127: 1, d3: 1, model: 'evil/model', prompt: 'напиши эссе', messages: [{ role: 'user', content: 'hi' }], apiKey: 'x', max_tokens: 99999,
+    d127: 1, d3: 1, model: MODEL_OPTIONS[1].id, prompt: 'напиши эссе', messages: [{ role: 'user', content: 'hi' }], max_tokens: 99999,
+    endpoint: 'https://evil.test', reasoning: { effort: 'none' },
   });
   assert.equal(res.status, 200);
   const [req] = upstream;
-  assert.equal(req.body.model, 'vendor/some-model');
+  assert.equal(req.body.model, MODEL_OPTIONS[1].id);
   assert.equal(req.headers.Authorization, `Bearer ${SECRET}`);
   assert.notEqual(req.body.max_tokens, 99999);
+  assert.equal(req.url, 'https://openrouter.ai/api/v1/chat/completions');
+  assert.equal(req.body.reasoning.effort, 'high');
   assert.ok(!JSON.stringify(req.body).includes('напиши эссе'));
 });
 
@@ -96,8 +106,8 @@ test('валидация: методы, тип, размер и диапазон
   for (const ok of [{ d127: 1, d3: 1 }, { d127: 127, d3: 3 }]) assert.equal((await call(ok)).status, 200);
 });
 
-test('без настройки: 503 и ни одного запроса к провайдеру', async () => {
-  for (const patch of [{ LLM_API_KEY: '' }, { LLM_MODEL: '' }, { LLM_PROVIDER: 'gpt-lol' }]) {
+test('без серверного ключа или с неизвестным провайдером: 503 без платных запросов', async () => {
+  for (const patch of [{ LLM_API_KEY: '' }, { LLM_PROVIDER: 'gpt-lol' }]) {
     env = { ...env, ...patch };
     const res = await call({ d127: 1, d3: 1 });
     assert.equal(res.status, 503);
@@ -114,7 +124,7 @@ test('без настройки: клиент получает код причи
 
   const logged = console.error.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
   assert.match(logged, /LLM_API_KEY/);
-  assert.match(logged, /LLM_MODEL/);
+  assert.doesNotMatch(logged, /LLM_MODEL/); // для OpenRouter модель задаётся интерфейсом
   assert.match(logged, /новым деплоям/); // подсказка, что после правки переменных нужен деплой
 });
 

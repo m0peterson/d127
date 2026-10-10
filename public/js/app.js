@@ -2,6 +2,7 @@ import { rollBoth, randomInt, D127, D3 } from './dice.js';
 import { loadQuotes, pickQuote, parseExamples, MAX_EXAMPLES, SLOTS } from './quotes.js';
 import { loadSettings, saveSettings, purgeLegacySettings, loadLast, saveLast } from './settings.js';
 import { generateQuote } from './llm.js';
+import { MODEL_OPTIONS, getModelChain } from './models.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -10,6 +11,7 @@ const els = {
   roll: $('rollBtn'), share: $('shareBtn'), toast: $('toast'),
   dialog: $('settings'), openSettings: $('openSettings'), closeSettings: $('closeSettings'),
   examples: $('examples'), examplesCount: $('examplesCount'),
+  model: $('model'), modelFallbacks: $('modelFallbacks'), apiKey: $('apiKey'), clearApiKey: $('clearApiKey'),
 };
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -82,7 +84,9 @@ async function resolveQuote({ d127, d3 }, settings) {
   const anchor = pickQuote(quotes, d127, d3);
   if (settings.source !== 'llm') return { text: anchor.text, source: 'collection', slot: anchor.slot };
   try {
-    const text = await generateQuote({ d127, d3, examples: parseExamples(settings.examples) });
+    const text = await generateQuote({
+      d127, d3, examples: parseExamples(settings.examples), model: settings.model, apiKey: settings.apiKey,
+    });
     return { text, source: 'llm', slot: anchor.slot };
   } catch (err) {
     toast(`LLM не ответила, показан сборник: ${err.message}`);
@@ -162,14 +166,41 @@ function showExamplesCount() {
     : 'Пока пусто, поэтому примеры берутся из сборника.';
 }
 
+function showModelFallbacks() {
+  const fallbacks = getModelChain(els.model.value).slice(1);
+  els.modelFallbacks.textContent = fallbacks.length
+    ? `Если модель не ответит: ${fallbacks.map(({ label }) => label).join(' → ')} → сборник.`
+    : 'Если модель не ответит, покажется цитата из сборника.';
+}
+
+function showKeyState() {
+  els.clearApiKey.disabled = !els.apiKey.value.trim();
+}
+
+function persistSettings(patch) {
+  if (!saveSettings(patch)) {
+    toast('Браузер не дал сохранить настройки: кончилось место или включён приватный режим');
+  }
+}
+
 function fillSettingsForm() {
-  const { source, examples } = loadSettings();
+  const { source, examples, model, apiKey } = loadSettings();
   for (const radio of document.querySelectorAll('input[name="source"]')) radio.checked = radio.value === source;
   els.examples.value = examples;
+  els.model.value = model;
+  els.apiKey.value = apiKey;
   showExamplesCount();
+  showModelFallbacks();
+  showKeyState();
 }
 
 function initSettings() {
+  for (const { id, label, reasoning } of MODEL_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = `${label} · ${reasoning}`;
+    els.model.append(option);
+  }
   fillSettingsForm();
 
   els.openSettings.addEventListener('click', () => {
@@ -183,16 +214,29 @@ function initSettings() {
 
   els.examples.addEventListener('input', () => {
     showExamplesCount();
-    if (!saveSettings({ examples: els.examples.value })) {
-      toast('Браузер не дал сохранить настройки: кончилось место или включён приватный режим');
-    }
+    persistSettings({ examples: els.examples.value });
+  });
+
+  els.model.addEventListener('change', () => {
+    showModelFallbacks();
+    persistSettings({ model: els.model.value });
+  });
+
+  els.apiKey.addEventListener('input', () => {
+    showKeyState();
+    persistSettings({ apiKey: els.apiKey.value });
+  });
+
+  els.clearApiKey.addEventListener('click', () => {
+    els.apiKey.value = '';
+    showKeyState();
+    persistSettings({ apiKey: '' });
+    els.apiKey.focus();
   });
 
   for (const radio of document.querySelectorAll('input[name="source"]')) {
     radio.addEventListener('change', () => {
-      if (!saveSettings({ source: radio.value })) {
-        toast('Браузер не дал сохранить настройки: кончилось место или включён приватный режим');
-      }
+      persistSettings({ source: radio.value });
     });
   }
 }
